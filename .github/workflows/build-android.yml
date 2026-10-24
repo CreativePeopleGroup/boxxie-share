@@ -57,10 +57,16 @@ jobs:
         run: |
           # direct = Fire TV / Downloader / Amazon Appstore (APK)
           # play   = Google Play Store (App Bundle, no "read all videos" permission)
-          gradle -p android assembleDirectRelease bundlePlayRelease \
+          set -o pipefail
+          if ! gradle -p android assembleDirectRelease bundlePlayRelease \
             -PappUrl="${{ steps.url.outputs.value }}" \
             -PversionCode=${{ github.run_number }} \
-            -PversionName=1.0.${{ github.run_number }}
+            -PversionName=1.0.${{ github.run_number }} 2>&1 | tee build.log; then
+            # Show the reason on the run page (and to anyone helping), not only in the raw log.
+            { grep -E "^e: |error:|ERROR:" build.log | head -15
+              awk '/What went wrong/{f=1} /^\* Try:/{f=0} f' build.log | head -25; } | sed 's/^/::error::/'
+            exit 1
+          fi
           cp android/app/build/outputs/apk/direct/release/app-direct-release.apk BoxxieShare.apk
           cp android/app/build/outputs/bundle/playRelease/app-play-release.aab BoxxieShare-GooglePlay.aab
           if [ -z "$BOXXIE_KEYSTORE_PATH" ]; then
