@@ -241,7 +241,7 @@ public class MainActivity extends Activity {
             root.addView(view, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
             web.setVisibility(View.GONE);
-            setImmersive(true);
+            setSystemBarsHidden(true);
         }
 
         @Override
@@ -255,13 +255,13 @@ public class MainActivity extends Activity {
         root.removeView(fullscreenView);
         fullscreenView = null;
         web.setVisibility(View.VISIBLE);
-        setImmersive(false);
+        setSystemBarsHidden(false);
         if (fullscreenCallback != null) fullscreenCallback.onCustomViewHidden();
         fullscreenCallback = null;
         web.requestFocus();
     }
 
-    private void setImmersive(boolean on) {
+    private void setSystemBarsHidden(boolean on) {
         if (Build.VERSION.SDK_INT >= 30) {
             WindowInsetsController c = getWindow().getInsetsController();
             if (c != null) {
