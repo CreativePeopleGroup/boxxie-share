@@ -61,6 +61,7 @@ public class MainActivity extends Activity {
     /** True while the page showing is the Boxxie Share site (the JS bridge only answers it). */
     private volatile boolean ourPage;
     private ScreenShareEngine engine;
+    private Updater updater;
 
     private WebView web;
     private FrameLayout root;
@@ -115,6 +116,9 @@ public class MainActivity extends Activity {
         // Whole-screen sharing for the page (phones, Android TV, Fire TV)
         engine = ScreenShareEngine.get(this);
         engine.setListener(json -> runOnUiThread(() -> {
+            if (web != null) web.evaluateJavascript("window.boxxieNativeEvent && window.boxxieNativeEvent(" + org.json.JSONObject.quote(json) + ")", null);
+        }));
+        updater = new Updater(this, json -> runOnUiThread(() -> {
             if (web != null) web.evaluateJavascript("window.boxxieNativeEvent && window.boxxieNativeEvent(" + org.json.JSONObject.quote(json) + ")", null);
         }));
         web.addJavascriptInterface(new NativeBridge(), "BoxxieNative");
@@ -606,6 +610,22 @@ public class MainActivity extends Activity {
             if (ourPage) engine.stop();
         }
 
+        /** App version, and whether this build can update itself (Fire TV / Downloader build). */
+        @JavascriptInterface
+        public String appInfo() {
+            return updater.info();
+        }
+
+        @JavascriptInterface
+        public void checkUpdate() {
+            if (ourPage) updater.check();
+        }
+
+        @JavascriptInterface
+        public void installUpdate() {
+            if (ourPage) updater.install();
+        }
+
         /** "Open another app": go to the home screen, sharing carries on. */
         @JavascriptInterface
         public void goHome() {
@@ -640,6 +660,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        if (updater != null) updater.release();
         if (engine != null && isFinishing()) {
             engine.setListener(null);
             engine.stop();

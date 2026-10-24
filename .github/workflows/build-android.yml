@@ -51,9 +51,11 @@ jobs:
 
       - name: Build
         env:
-          BOXXIE_KEYSTORE_PASSWORD: ${{ secrets.BOXXIE_KEYSTORE_PASSWORD }}
-          BOXXIE_KEY_ALIAS: ${{ secrets.BOXXIE_KEY_ALIAS }}
-          BOXXIE_KEY_PASSWORD: ${{ secrets.BOXXIE_KEY_PASSWORD }}
+          # Only BOXXIE_KEYSTORE_BASE64 is needed: the key file itself is the secret.
+          # (The other three can still be set to override these defaults.)
+          BOXXIE_KEYSTORE_PASSWORD: ${{ secrets.BOXXIE_KEYSTORE_PASSWORD || 'boxxie-share-signing' }}
+          BOXXIE_KEY_ALIAS: ${{ secrets.BOXXIE_KEY_ALIAS || 'boxxie' }}
+          BOXXIE_KEY_PASSWORD: ${{ secrets.BOXXIE_KEY_PASSWORD || 'boxxie-share-signing' }}
         run: |
           # direct = Fire TV / Downloader / Amazon Appstore (APK)
           # play   = Google Play Store (App Bundle, no "read all videos" permission)
@@ -61,7 +63,8 @@ jobs:
           if ! gradle -p android assembleDirectRelease bundlePlayRelease \
             -PappUrl="${{ steps.url.outputs.value }}" \
             -PversionCode=${{ github.run_number }} \
-            -PversionName=1.0.${{ github.run_number }} 2>&1 | tee build.log; then
+            -PversionName=1.0.${{ github.run_number }} \
+            -PupdateUrl="https://github.com/${{ github.repository }}/releases/latest/download/" 2>&1 | tee build.log; then
             # Show the reason on the run page (and to anyone helping), not only in the raw log.
             { grep -E "^e: |error:|ERROR:" build.log | head -15
               awk '/What went wrong/{f=1} /^\* Try:/{f=0} f' build.log | head -25; } | sed 's/^/::error::/'
@@ -69,6 +72,8 @@ jobs:
           fi
           cp android/app/build/outputs/apk/direct/release/app-direct-release.apk BoxxieShare.apk
           cp android/app/build/outputs/bundle/playRelease/app-play-release.aab BoxxieShare-GooglePlay.aab
+          # The app's Update button reads this to see if there's a newer version
+          echo '{"versionCode": ${{ github.run_number }}, "versionName": "1.0.${{ github.run_number }}"}' > version.json
           if [ -z "$BOXXIE_KEYSTORE_PATH" ]; then
             echo "::warning::BoxxieShare-GooglePlay.aab is signed with a temporary key, so Google Play will refuse it. Add your upload key (README: Google Play) and run this again."
           fi
@@ -90,7 +95,9 @@ jobs:
           tag_name: android-1.0.${{ github.run_number }}
           name: Boxxie Share 1.0.${{ github.run_number }}
           make_latest: true
-          files: BoxxieShare.apk
+          files: |
+            BoxxieShare.apk
+            version.json
           body: |
             Install on Fire TV / Android TV with the Downloader app using:
             https://github.com/${{ github.repository }}/releases/latest/download/BoxxieShare.apk
