@@ -1,0 +1,79 @@
+plugins {
+    id 'com.android.application'
+}
+
+def appUrl = (project.findProperty('appUrl') ?: 'https://example.github.io/boxxie-share/').toString()
+if (!appUrl.endsWith('/')) appUrl = appUrl + '/'
+def versionNum = (project.findProperty('versionCode') ?: '1').toString().toInteger()
+def versionLabel = (project.findProperty('versionName') ?: '1.0.0').toString()
+
+android {
+    namespace 'com.boxxieshare.app'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'com.boxxieshare.app'
+        minSdk 22          // Fire TV Stick (2nd gen, Fire OS 5) and newer
+        targetSdk 36
+        versionCode versionNum
+        versionName versionLabel
+        buildConfigField 'String', 'APP_URL', "\"${appUrl}\""
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    // Two versions of the same app:
+    //  play   - for the Google Play Store: no "read all videos" permission; films come from
+    //           Android's own file picker (Google's photo and video permissions policy).
+    //  direct - for Fire TV / Downloader / Amazon Appstore: also lists the films on the device,
+    //           because most Fire TVs have no file picker.
+    flavorDimensions 'store'
+    productFlavors {
+        play {
+            dimension 'store'
+            buildConfigField 'boolean', 'LIST_DEVICE_VIDEOS', 'false'
+        }
+        direct {
+            dimension 'store'
+            buildConfigField 'boolean', 'LIST_DEVICE_VIDEOS', 'true'
+        }
+    }
+
+    signingConfigs {
+        release {
+            // Supplied by the GitHub workflow from repository secrets (see README).
+            def ks = System.getenv('BOXXIE_KEYSTORE_PATH')
+            if (ks) {
+                storeFile file(ks)
+                storePassword System.getenv('BOXXIE_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('BOXXIE_KEY_ALIAS')
+                keyPassword System.getenv('BOXXIE_KEY_PASSWORD')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (System.getenv('BOXXIE_KEYSTORE_PATH')) {
+                signingConfig signingConfigs.release
+            } else {
+                // No release key set up yet: sign with the debug key so it still installs.
+                signingConfig signingConfigs.debug
+            }
+        }
+    }
+
+    lint {
+        // Lint can't see every Build.VERSION guard; don't let warnings block a build.
+        abortOnError false
+        checkReleaseBuilds false
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}

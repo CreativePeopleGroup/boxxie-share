@@ -1,0 +1,50 @@
+name: Deploy web app
+
+# Publishes web/ to GitHub Pages (free). Runs on every change to web/ or by hand.
+on:
+  push:
+    branches: [main]
+    paths: ["web/**", ".github/workflows/deploy-web.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Point the app at your connection server
+        env:
+          SERVER_URL: ${{ vars.SERVER_URL }}
+        run: |
+          if [ -z "$SERVER_URL" ]; then
+            echo "::warning::SERVER_URL repository variable is not set yet. The site will load but can't open rooms. See README step 3."
+          fi
+          SERVER_URL="${SERVER_URL%/}"
+          sed -i "s#__SERVER_URL__#${SERVER_URL:-__SERVER_URL__}#" web/config.js
+          cat web/config.js
+
+      - name: Put your contact email on the privacy page
+        env:
+          CONTACT_EMAIL: ${{ vars.CONTACT_EMAIL }}
+        run: |
+          if [ -n "$CONTACT_EMAIL" ]; then sed -i "s#CONTACT-EMAIL#${CONTACT_EMAIL}#g" web/privacy.html web/terms.html; fi
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+      - id: deployment
+        uses: actions/deploy-pages@v4

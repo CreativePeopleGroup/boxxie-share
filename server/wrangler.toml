@@ -1,0 +1,47 @@
+name = "boxxie-share-server"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+
+# Durable Objects on the Workers FREE plan must use SQLite storage.
+[[durable_objects.bindings]]
+name = "ROOM"
+class_name = "Room"
+
+[[durable_objects.bindings]]
+name = "LIMITER"
+class_name = "Limiter"
+
+[[durable_objects.bindings]]
+name = "DIRECTORY"
+class_name = "Directory"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room", "Limiter"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["Directory"]
+
+[vars]
+# Comma-separated list of web addresses allowed to use this server.
+# Set to your GitHub Pages address, e.g. "https://yourname.github.io"
+# Leave as "*" only while testing.
+ALLOWED_ORIGINS = "*"
+
+# ---- Sign-in (set these as SECRETS with `npx wrangler secret put NAME`, or in the
+# Cloudflare dashboard: Workers & Pages → boxxie-share-server → Settings → Variables and Secrets)
+# Google:   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+# Facebook: FACEBOOK_APP_ID, FACEBOOK_APP_SECRET
+# Email:    EMAIL_PROVIDER ("brevo" or "resend"), EMAIL_API_KEY, EMAIL_FROM ("Boxxie Share <you@example.com>")
+# Each sign-in option appears in the app once its keys are set.
+
+# ---- Safety reports (needed for Google Play): reports are emailed to REPORT_EMAIL
+# (or the CONTACT_EMAIL repository variable). Set ADMIN_TOKEN (any long random text) as a
+# SECRET to get a one-click "ban this account" link in each report email.
+
+# Optional (recommended): Cloudflare Realtime TURN relay, 1,000 GB/month free.
+# Helps people on strict networks (mobile data, some offices) connect.
+# Set these as SECRETS, not here:
+#   npx wrangler secret put TURN_KEY_ID
+#   npx wrangler secret put TURN_KEY_API_TOKEN

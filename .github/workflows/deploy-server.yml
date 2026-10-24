@@ -1,0 +1,53 @@
+name: Deploy server
+
+# Tests and deploys the connection server to Cloudflare Workers (free plan).
+# Needs repository secrets CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID (README step 2).
+on:
+  push:
+    branches: [main]
+    paths: ["server/**", ".github/workflows/deploy-server.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run server tests
+        working-directory: server
+        run: node --import ./test/register.mjs test/harness.mjs
+
+      - name: Work out which website may use the server
+        id: origin
+        run: |
+          OWNER="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          ORIGIN="${{ vars.PAGES_ORIGIN }}"
+          if [ -z "$ORIGIN" ]; then ORIGIN="https://${OWNER}.github.io"; fi
+          echo "Allowed website: $ORIGIN"
+          echo "value=$ORIGIN" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy to Cloudflare
+        id: deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: server
+          # CONTACT_EMAIL (repository variable) also receives abuse reports, unless REPORT_EMAIL is set.
+          command: deploy --var ALLOWED_ORIGINS:${{ steps.origin.outputs.value }} ${{ vars.CONTACT_EMAIL && format('--var CONTACT_EMAIL:{0}', vars.CONTACT_EMAIL) || '' }}
+
+      - name: Show the server address
+        run: |
+          echo "### Server deployed" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Address: \`${{ steps.deploy.outputs.deployment-url }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Add it as the **SERVER_URL** repository variable (README step 3), then re-run **Deploy web app**." >> "$GITHUB_STEP_SUMMARY"

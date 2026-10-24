@@ -1,0 +1,467 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https: wss:; media-src 'self' blob: mediastream:; img-src 'self' data: blob: https:; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <title>Boxxie Share</title>
+  <meta name="description" content="Watch your own films together. Share a code, approve who joins, talk on video while you watch.">
+  <meta name="theme-color" content="#0b1118">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="style.css">
+  <script src="config.js"></script>
+  <script src="qr.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <!-- Icons (drawn for Boxxie Share) -->
+  <svg class="sprite" width="0" height="0" aria-hidden="true" focusable="false">
+    <defs>
+      <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></symbol>
+      <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6.5" y="5" width="4" height="14" rx="1.2" fill="currentColor"/><rect x="13.5" y="5" width="4" height="14" rx="1.2" fill="currentColor"/></symbol>
+      <symbol id="i-back10" viewBox="0 0 24 24"><path d="M12 5a7 7 0 1 1-6.6 4.7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M12 2.5 8.5 5 12 7.5z" fill="currentColor"/><text x="12" y="15.6" text-anchor="middle" font-size="7" font-weight="700" font-family="Montserrat,Arial,sans-serif" fill="currentColor">10</text></symbol>
+      <symbol id="i-fwd30" viewBox="0 0 24 24"><path d="M12 5a7 7 0 1 0 6.6 4.7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M12 2.5 15.5 5 12 7.5z" fill="currentColor"/><text x="12" y="15.6" text-anchor="middle" font-size="7" font-weight="700" font-family="Montserrat,Arial,sans-serif" fill="currentColor">30</text></symbol>
+      <symbol id="i-full" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-chat" viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8l-5 3.5V17H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+      <symbol id="i-share" viewBox="0 0 24 24"><path d="M12 3v12M7.5 7.5 12 3l4.5 4.5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-people" viewBox="0 0 24 24"><circle cx="9" cy="8.5" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3 19c.6-3.3 3-5 6-5s5.4 1.7 6 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M17 5.5v6M14 8.5h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+      <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+      <symbol id="i-film" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M7.5 5v14M16.5 5v14M3.5 9.5h4M3.5 14.5h4M16.5 9.5h4M16.5 14.5h4" stroke="currentColor" stroke-width="1.6"/></symbol>
+      <symbol id="i-screen" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M9 20h6M12 16.5V20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+      <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="2" fill="currentColor"/></symbol>
+      <symbol id="i-bubble" viewBox="0 0 24 24"><path d="M12 3.5a8.5 8.5 0 0 0-7.4 12.7L3.5 20.5l4.4-1.1A8.5 8.5 0 1 0 12 3.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9 9.2c.3 2.6 3 5.4 5.8 5.8l1.2-1.4-2-1-1 .8c-1-.5-1.9-1.4-2.4-2.4l.8-1-1-2z" fill="currentColor"/></symbol>
+      <symbol id="i-message" viewBox="0 0 24 24"><path d="M12 4C7 4 3 7.3 3 11.3c0 2.3 1.3 4.3 3.3 5.7L5.5 20l3.6-1.9c.9.2 1.9.4 2.9.4 5 0 9-3.3 9-7.2S17 4 12 4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+      <symbol id="i-mail" viewBox="0 0 24 24"><rect x="3" y="5.5" width="18" height="13" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="m3.8 7 8.2 6 8.2-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+      <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
+      <symbol id="i-more" viewBox="0 0 24 24"><circle cx="6" cy="12" r="1.7" fill="currentColor"/><circle cx="12" cy="12" r="1.7" fill="currentColor"/><circle cx="18" cy="12" r="1.7" fill="currentColor"/></symbol>
+      <symbol id="i-phone" viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="2.4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M10.5 18.5h3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+      <symbol id="i-cam" viewBox="0 0 24 24"><rect x="3" y="6.5" width="13" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="m16 10.5 5-3v9l-5-3z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+      <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+      <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/></symbol>
+      <symbol id="i-call" viewBox="0 0 24 24"><rect x="2.5" y="6.5" width="13" height="11" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="m15.5 10.5 6-3.5v10l-6-3.5z" fill="currentColor"/></symbol>
+      <symbol id="i-home" viewBox="0 0 24 24"><path d="M4 11 12 4.5 20 11v9H4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+      <symbol id="i-out" viewBox="0 0 24 24"><path d="M10 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4M15 8l4 4-4 4M19 12H9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-faces" viewBox="0 0 24 24"><circle cx="8" cy="10" r="3.5" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="16.5" cy="13.5" r="3.5" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+      <symbol id="i-airplay" viewBox="0 0 24 24"><path d="M6 17H4.5A1.5 1.5 0 0 1 3 15.5v-10A1.5 1.5 0 0 1 4.5 4h15A1.5 1.5 0 0 1 21 5.5v10a1.5 1.5 0 0 1-1.5 1.5H18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M12 14.5 17 20.5H7z" fill="currentColor"/></symbol>
+      <symbol id="i-playpause" viewBox="0 0 24 24"><path d="M3.5 6v12l8-6z" fill="currentColor"/><rect x="13.5" y="6" width="2.6" height="12" rx="1" fill="currentColor"/><rect x="18.2" y="6" width="2.6" height="12" rx="1" fill="currentColor"/></symbol>
+    </defs>
+  </svg>
+  <main id="main">
+
+  <!-- ============ Home: share on the left, join on the right ============ -->
+  <section class="screen home" id="screen-home" data-screen="home">
+    <header class="topbar">
+      <h1 class="wordmark"><img src="icons/boxxie-logo.png" alt="boxxie" width="405" height="160"><span class="share">share</span></h1>
+      <div class="account" id="account">
+        <span class="chip me-chip"><span class="av" id="me-av"></span><span class="nm" id="me-name"></span></span>
+        <span class="nav-btn nav-current" aria-current="page"><svg><use href="#i-home"/></svg><span class="nav-lbl">Home</span></span>
+        <button class="small nav-btn" id="go-friends"><svg><use href="#i-people"/></svg><span class="nav-lbl">Friends</span><span class="badge" id="friends-badge" hidden></span></button>
+        <button class="small nav-btn" id="signout"><svg><use href="#i-out"/></svg><span class="nav-lbl">Sign out</span></button>
+      </div>
+    </header>
+
+    <div class="hero">
+      <p class="hero-kicker" id="hero-kicker">Film night</p>
+      <h1 class="hero-title" id="hero-title">Watch together.</h1>
+      <p class="hero-sub">Share a film or your screen. Friends join with a code, and you talk while you watch.</p>
+    </div>
+
+    <section class="invites" id="invites" hidden aria-label="Invitations">
+      <ul id="invite-list"></ul>
+    </section>
+
+    <div class="home-grid">
+      <form class="card share-card" id="host-form" autocomplete="off" aria-labelledby="share-h">
+        <h2 id="share-h"><svg class="h-ic"><use href="#i-film"/></svg>Host a watch party</h2>
+        <p class="unsupported" id="host-unsupported" hidden>This device can watch and video call, but it can't share. Use a Fire TV Stick, Android TV, Android phone or a computer to share.</p>
+
+        <div id="share-options">
+          <div class="field" id="source-field">
+            <span class="label" id="source-label">What to share</span>
+            <div class="segmented" role="radiogroup" aria-labelledby="source-label">
+              <button type="button" role="radio" aria-checked="true" data-source="file"><svg><use href="#i-film"/></svg>Video file</button>
+              <button type="button" role="radio" aria-checked="false" data-source="screen"><svg><use href="#i-screen"/></svg>My screen</button>
+            </div>
+          </div>
+
+          <div class="field" id="file-field">
+            <label class="file-pick" for="film-file"><span id="film-label">Choose a film…</span></label>
+            <input id="film-file" type="file" accept="video/*,.mkv,.mp4,.webm,.mov,.m4v" class="visually-hidden">
+          </div>
+          <div class="field" id="screen-field" hidden>
+            <p class="note">Next you'll pick a screen, window or tab. Tick <strong>Share audio</strong> for sound, then put on anything you like. Friends can join whenever they want.</p>
+          </div>
+
+          <div class="opts-row">
+          <div class="field">
+            <span class="label" id="quality-label">Picture</span>
+            <div class="segmented" role="radiogroup" aria-labelledby="quality-label">
+              <button type="button" role="radio" aria-checked="true" data-quality="hd">HD 1080p</button>
+              <button type="button" role="radio" aria-checked="false" data-quality="4k">4K Ultra HD</button>
+            </div>
+            <small class="note" id="quality-note"></small>
+          </div>
+
+          <div class="field inline">
+            <label for="max-viewers" class="label">Up to</label>
+            <select id="max-viewers">
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+              <option value="6" selected>6</option>
+              <option value="8">8</option>
+            </select>
+            <span class="muted">friends</span>
+          </div>
+          </div>
+
+          <p class="error" id="host-error" role="alert" hidden></p>
+          <button class="primary big" type="submit" id="host-start" data-autofocus>Start sharing</button>
+        </div>
+      </form>
+
+      <form class="card join-card" id="join-form" autocomplete="off" aria-labelledby="join-h">
+        <h2 id="join-h"><svg class="h-ic"><use href="#i-people"/></svg>Join a friend</h2>
+        <p class="muted">Type the code on your friend's screen, or open their invite link.</p>
+        <label class="visually-hidden" for="join-code">Room code</label>
+        <input id="join-code" class="code-input" maxlength="16" inputmode="text" autocapitalize="characters" spellcheck="false" placeholder="ABCD-2345">
+        <p class="error" id="join-error" role="alert" hidden></p>
+        <button class="primary big" type="submit" id="join-start">Join</button>
+        <ul class="join-points">
+          <li><svg><use href="#i-lock"/></svg><span>The host lets each person in.</span></li>
+          <li><svg><use href="#i-phone"/></svg><span>Pairing a phone with a TV? Scan its QR code, or type the longer code it shows.</span></li>
+        </ul>
+      </form>
+    </div>
+
+    <p class="hint" id="install-hint" hidden></p>
+  </section>
+
+  <!-- ============ Sign in ============ -->
+  <section class="screen signin" id="screen-signin" data-screen="signin" hidden>
+    <div class="signin-box">
+      <h1 class="wordmark"><img src="icons/boxxie-logo.png" alt="boxxie" width="405" height="160"><span class="share">share</span></h1>
+      <h2>Sign in</h2>
+      <p class="muted">Everyone signs in, so only people you know can join your rooms.</p>
+
+      <div class="signin-tv" id="signin-tv" hidden>
+        <div class="pair-qr" id="signin-qr" aria-hidden="true"></div>
+        <div>
+          <p><strong>Scan with your phone's camera</strong> and approve on your phone. This screen signs in by itself.</p>
+          <p class="note">Or open <span id="signin-site"></span> on your phone, sign in, and type:</p>
+          <div class="pair-code" id="signin-device-code"></div>
+          <p class="note" id="signin-tv-status">Waiting for your phone…</p>
+        </div>
+      </div>
+
+      <div class="signin-buttons" id="signin-social">
+        <button class="social google" id="signin-google" hidden><span class="logo" aria-hidden="true">G</span>Continue with Google</button>
+        <button class="social facebook" id="signin-facebook" hidden><span class="logo" aria-hidden="true">f</span>Continue with Facebook</button>
+      </div>
+      <p class="note" id="signin-inapp" hidden>Google and Facebook sign-in only work in a phone or computer browser. Use the QR code above or an email code here.</p>
+
+      <div class="or" id="signin-or"><span>or</span></div>
+
+      <form id="email-form" class="email-form" autocomplete="on">
+        <label for="signin-email" class="label">Email</label>
+        <input id="signin-email" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com">
+        <button class="primary big" type="submit" id="email-send">Email me a sign-in code</button>
+      </form>
+      <form id="code-form" class="email-form" autocomplete="off" hidden>
+        <p>We've sent a code to <strong id="code-email"></strong>. Type it here, or tap the link in the email.</p>
+        <label for="signin-code" class="label">6-digit code</label>
+        <input id="signin-code" class="code-input" inputmode="numeric" maxlength="6" placeholder="123456" autocomplete="one-time-code">
+        <button class="primary big" type="submit" id="code-submit">Sign in</button>
+        <button type="button" class="small" id="code-back">Use a different email</button>
+      </form>
+      <p class="error" id="signin-error" role="alert" hidden></p>
+      <p class="note">By signing in you agree to the <a href="terms.html" target="_blank" rel="noopener">Terms of use</a>, including zero tolerance for abusive or illegal content, and the <a href="privacy.html" target="_blank" rel="noopener">Privacy policy</a>.</p>
+    </div>
+  </section>
+
+  <!-- ============ Approve a TV sign-in (on a phone) ============ -->
+  <section class="screen waiting" id="screen-device" data-screen="device" hidden>
+    <div class="center-col">
+      <div class="waiting-logo"><img src="icons/boxxie-logo.png" alt="boxxie share" width="405" height="160"></div>
+      <h2 id="device-title">Sign in on your TV?</h2>
+      <p class="muted" id="device-text"></p>
+      <div class="row center">
+        <button class="primary" id="device-yes">Yes, sign in the TV</button>
+        <button id="device-no">No</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ Friends ============ -->
+  <section class="screen home" id="screen-friends" data-screen="friends" hidden>
+    <header class="topbar">
+      <button class="small" id="friends-back">‹ Back</button>
+      <h2>Friends</h2>
+      <span></span>
+    </header>
+    <div class="friends-grid">
+      <div class="card">
+        <h3>Add a friend</h3>
+        <p class="muted">Type the email they sign in with. If they don't have Boxxie Share yet, they'll get an invitation.</p>
+        <form id="friend-add-form" class="row-form" autocomplete="off">
+          <input id="friend-email" type="email" inputmode="email" placeholder="friend@example.com" aria-label="Friend's email">
+          <button class="primary" type="submit">Add</button>
+        </form>
+        <p class="note" id="friend-add-msg" role="status"></p>
+        <h3>Your name</h3>
+        <form id="rename-form" class="row-form" autocomplete="off">
+          <input id="rename-input" maxlength="40" aria-label="Your name">
+          <button type="submit">Save</button>
+        </form>
+        <h3>Your account</h3>
+        <p class="note">Signed in as <span id="me-email"></span>. <a href="terms.html" target="_blank" rel="noopener">Terms</a> · <a href="privacy.html" target="_blank" rel="noopener">Privacy</a></p>
+        <button class="small" id="report-problem">Report a problem or abuse</button>
+        <button class="small deny" id="delete-account">Delete my account</button>
+      </div>
+      <div class="card">
+        <div id="friend-requests-wrap" hidden>
+          <h3>Friend requests</h3>
+          <ul class="friend-list" id="friend-requests"></ul>
+        </div>
+        <h3>Your friends</h3>
+        <ul class="friend-list" id="friend-list"></ul>
+        <p class="muted" id="friends-empty">No friends yet. Add someone by email.</p>
+        <div id="friend-sent-wrap" hidden>
+          <h3>Waiting for them to accept</h3>
+          <ul class="friend-list" id="friend-sent"></ul>
+        </div>
+        <div id="blocked-wrap" hidden>
+          <h3>Blocked</h3>
+          <p class="note">Blocked people can't send you friend requests, invite you, join your rooms, or appear in your chat.</p>
+          <ul class="friend-list" id="blocked-list"></ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ Waiting to be let in ============ -->
+  <section class="screen waiting" id="screen-waiting" data-screen="waiting" hidden>
+    <div class="center-col">
+      <div class="waiting-logo"><img src="icons/boxxie-logo.png" alt="boxxie share" width="405" height="160"></div>
+      <div class="pulse" aria-hidden="true"></div>
+      <h2 id="waiting-title">Waiting to be let in</h2>
+      <p id="waiting-text" class="muted">The host will see your name and choose whether to let you in.</p>
+      <button class="secondary" id="waiting-cancel">Cancel</button>
+    </div>
+  </section>
+
+  <!-- ============ Room: the film fills the screen; call and chat live in the dock, the drawer, or the paired phone ============ -->
+  <section class="screen room side-hidden" id="screen-room" data-screen="room" hidden>
+    <div class="stage-col">
+      <div class="stage" id="stage">
+        <video id="film" playsinline></video>
+        <div class="stage-empty" id="stage-empty"><p id="stage-empty-text">Connecting to the film…</p></div>
+        <button class="sound-on" id="sound-on" hidden>Turn sound on</button>
+        <div class="banner" id="banner" role="status" hidden></div>
+
+        <div class="overlay top-overlay">
+          <img class="stage-mark" src="icons/icon-192.png" alt="Boxxie Share" width="192" height="192">
+          <span class="glass-pill" id="live-pill"><span class="live-dot" aria-hidden="true"></span><span id="live-text">Live</span></span>
+          <button class="glass-pill code-pill" id="code-pill" hidden aria-label="Share the room code"></button>
+        </div>
+
+        <!-- Video call faces sit here, small, while the drawer is closed -->
+        <div class="faces faces-corner" id="faces" aria-label="Video call"></div>
+        <ol class="chat-toasts" id="chat-toasts" aria-hidden="true"></ol>
+
+        <div class="overlay bottom-overlay">
+          <div class="controls" id="host-controls" hidden>
+            <button id="ctl-back" class="icon-btn" aria-label="Back 10 seconds" title="Back 10 seconds"><svg><use href="#i-back10"/></svg></button>
+            <button id="ctl-play" class="icon-btn play" aria-label="Play" title="Play"><svg><use href="#i-play"/></svg></button>
+            <button id="ctl-fwd" class="icon-btn" aria-label="Forward 30 seconds" title="Forward 30 seconds"><svg><use href="#i-fwd30"/></svg></button>
+            <input type="range" id="ctl-seek" min="0" max="1000" value="0" aria-label="Position in film">
+            <span class="time" id="ctl-time">0:00 / 0:00</span>
+            <button id="ctl-change" class="icon-btn" aria-label="Change film" title="Change film"><svg><use href="#i-film"/></svg><span class="visually-hidden">Change film</span></button>
+          </div>
+          <div class="controls" id="screen-controls" hidden>
+            <span class="live-dot" aria-hidden="true"></span>
+            <span id="screen-status">Sharing your screen</span>
+            <span class="spacer"></span>
+            <button id="ctl-reshare" class="pill-btn"><svg><use href="#i-screen"/></svg><span>Share something else</span></button>
+            <button id="ctl-stopshare" class="pill-btn"><svg><use href="#i-stop"/></svg><span>Stop sharing</span></button>
+          </div>
+          <div class="controls" id="viewer-controls" hidden>
+            <span class="live-dot" aria-hidden="true"></span>
+            <span id="viewer-status">Live from the host</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- FaceTime-style dock -->
+    <div class="dock" id="dock" role="toolbar" aria-label="Call and room">
+      <button class="dock-btn" id="mic-toggle" hidden aria-pressed="false" title="Mute"><svg><use href="#i-mic"/></svg><span class="lbl">Mute</span></button>
+      <button class="dock-btn" id="cam-toggle" hidden aria-pressed="false" title="Camera off"><svg><use href="#i-cam"/></svg><span class="lbl">Camera off</span></button>
+      <button class="dock-btn" id="call-toggle" title="Join video call"><svg><use href="#i-call"/></svg><span class="lbl">Join video call</span></button>
+      <button class="dock-btn" id="pair-phone" title="Use your phone for the video call"><svg><use href="#i-phone"/></svg><span class="lbl">Use phone</span></button>
+      <button class="dock-btn" id="airplay-open" hidden title="Watch on Apple TV"><svg><use href="#i-airplay"/></svg><span class="lbl">Apple TV</span></button>
+      <button class="dock-btn sand" id="share-open" title="Share invite"><svg><use href="#i-share"/></svg><span class="lbl">Share invite</span></button>
+      <button class="dock-btn" id="toggle-side" aria-expanded="false" aria-controls="side" title="Show chat"><svg><use href="#i-chat"/></svg><span class="lbl">Chat</span><span class="unread" id="chat-unread" hidden></span></button>
+      <button class="dock-btn" id="ctl-full" title="Full screen"><svg><use href="#i-full"/></svg><span class="lbl">Full screen</span></button>
+      <button class="dock-btn red" id="leave" title="Leave"><svg><use href="#i-x"/></svg><span class="lbl">Leave room</span></button>
+    </div>
+
+    <aside class="side" id="side" aria-label="Room">
+      <div class="side-head">
+        <img class="side-mark" src="icons/icon-192.png" alt="" width="192" height="192">
+        <div class="side-title"><strong id="side-title">Watch party</strong><span class="note" id="people-count">Watching</span></div>
+      </div>
+
+      <div class="group" id="code-block" hidden>
+        <div class="code-meta">
+          <span class="label">Room code</span>
+          <span class="quality-tag" id="quality-tag" hidden></span>
+        </div>
+        <div class="marquee" id="code-tiles"></div>
+        <div class="row">
+          <button class="small" id="invite-open"><svg><use href="#i-people"/></svg>Invite friends</button>
+          <button class="icon-btn small-ic" id="lock-room" aria-pressed="false" aria-label="Lock room" title="Stop anyone else asking to join"><svg><use href="#i-lock"/></svg><span class="visually-hidden">Lock</span></button>
+        </div>
+      </div>
+
+      <div class="chips" id="people-list"></div>
+
+      <p class="call-mode-note" id="call-mode-note" hidden></p>
+
+      <!-- The paired phone is the remote for the TV -->
+      <div class="group remote" id="remote" hidden>
+        <div class="label">Remote</div>
+        <div class="remote-row" id="remote-film">
+          <button class="icon-btn" id="remote-back" aria-label="Back 10 seconds"><svg><use href="#i-back10"/></svg></button>
+          <button class="icon-btn play" id="remote-play" aria-label="Play or pause the film"><svg><use href="#i-playpause"/></svg></button>
+          <button class="icon-btn" id="remote-fwd" aria-label="Forward 30 seconds"><svg><use href="#i-fwd30"/></svg></button>
+        </div>
+      </div>
+
+      <div class="faces-row">
+        <span class="label" id="faces-label">Faces on the big screen</span>
+        <div class="segmented mini" role="radiogroup" aria-labelledby="faces-label" id="faces-mode">
+          <button type="button" role="radio" aria-checked="true" data-faces="corner">Corner</button>
+          <button type="button" role="radio" aria-checked="false" data-faces="mini">Mini</button>
+          <button type="button" role="radio" aria-checked="false" data-faces="off">Off</button>
+        </div>
+      </div>
+
+      <div class="cams" id="cams" aria-label="Video call"></div>
+
+      <div class="chat">
+        <ol id="chat-log" class="chat-log" aria-live="polite"></ol>
+        <div class="reactions" role="group" aria-label="Quick reactions">
+          <button class="react" data-react="😂">😂</button>
+          <button class="react" data-react="😮">😮</button>
+          <button class="react" data-react="❤️">❤️</button>
+          <button class="react" data-react="👏">👏</button>
+          <button class="react" data-react="😱">😱</button>
+        </div>
+        <form id="chat-form" class="chat-form" autocomplete="off">
+          <input id="chat-input" maxlength="500" placeholder="Message" aria-label="Chat message">
+          <button class="send" type="submit" aria-label="Send"><svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        </form>
+      </div>
+    </aside>
+
+    <!-- Join requests: always on top so the host never misses one -->
+    <div class="requests" id="requests" hidden role="region" aria-label="Asking to join">
+      <ul id="request-list"></ul>
+    </div>
+
+    <!-- Sheets -->
+    <div class="sheet share-panel" id="share-panel" hidden role="dialog" aria-label="Share invite">
+      <div class="invite-head"><h3>Share invite</h3><button class="small" id="share-close">Done</button></div>
+      <div class="share-grid" id="share-apps">
+        <a class="share-opt" id="share-whatsapp" target="_blank" rel="noopener"><span class="share-ic ic-wa"><svg><use href="#i-bubble"/></svg></span>WhatsApp</a>
+        <a class="share-opt" id="share-sms"><span class="share-ic ic-im"><svg><use href="#i-message"/></svg></span><span id="share-sms-label">Messages</span></a>
+        <a class="share-opt" id="share-email"><span class="share-ic ic-sand"><svg><use href="#i-mail"/></svg></span>Email</a>
+        <button class="share-opt" id="share-link"><span class="share-ic ic-rose"><svg><use href="#i-link"/></svg></span><span id="share-link-label">Copy link</span></button>
+        <button class="share-opt" id="share-more" hidden><span class="share-ic ic-steel"><svg><use href="#i-more"/></svg></span>More</button>
+      </div>
+      <div class="share-qr-row">
+        <div class="pair-qr" id="share-qr" aria-hidden="true"></div>
+        <p class="note">Friends can scan this with their phone's camera to join. They'll sign in, then you let them in.</p>
+      </div>
+    </div>
+
+    <div class="sheet invite-panel" id="invite-panel" hidden role="dialog" aria-label="Invite friends">
+      <div class="invite-head"><h3>Invite friends</h3><button class="small" id="invite-close">Done</button></div>
+      <p class="note">Invited friends get a notification and go straight in.</p>
+      <ul class="friend-list" id="invite-friends"></ul>
+      <p class="muted" id="invite-empty" hidden>Add friends from the home screen first.</p>
+    </div>
+
+    <div class="sheet airplay-panel" id="airplay-panel" hidden role="dialog" aria-label="Watch on Apple TV">
+      <div class="invite-head"><h3>Watch on Apple TV</h3><button class="small" id="airplay-close">Done</button></div>
+      <p class="note">Your iPhone, iPad or Mac sends the film to the Apple TV with Screen Mirroring. Keep this device on the same Wi-Fi as the Apple TV.</p>
+      <ol class="steps">
+        <li><b>iPhone or iPad:</b> swipe down from the top-right corner to open Control Center.</li>
+        <li>Tap <b>Screen Mirroring</b> (two overlapping rectangles) and choose your Apple TV.</li>
+        <li>Come back here and tap <b>Film full screen</b>, then turn your phone sideways.</li>
+      </ol>
+      <p class="note"><b>Mac:</b> click Control Centre in the menu bar, then Screen Mirroring, and choose the Apple TV.</p>
+      <div class="row">
+        <button class="primary" id="airplay-full"><svg><use href="#i-full"/></svg>Film full screen</button>
+        <button id="airplay-pick" hidden><svg><use href="#i-airplay"/></svg>Choose Apple TV</button>
+      </div>
+      <p class="note">Talk on the call with headphones or a second phone, so the TV doesn't echo.</p>
+    </div>
+
+    <div class="sheet person-panel" id="person-panel" hidden role="dialog" aria-labelledby="person-name">
+      <div class="invite-head"><h3 id="person-name"></h3><button class="small" id="person-close">Done</button></div>
+      <div class="person-actions">
+        <button id="person-remove" class="deny-strong">Remove from the room</button>
+        <button id="person-block">Block</button>
+        <button id="person-report">Report</button>
+      </div>
+      <p class="note">Blocking stops them inviting you, joining your rooms or showing up in your chat. Reports go to the people who run this Boxxie Share.</p>
+    </div>
+
+    <div class="sheet pair-panel" id="pair-panel" hidden role="dialog" aria-label="Pair your phone">
+      <div class="pair-qr" id="pair-qr" aria-hidden="true"></div>
+      <div class="pair-text">
+        <h3>Use your phone</h3>
+        <p><strong>Scan with your phone's camera.</strong> Your phone runs the video call and chat, and works as a remote. The film stays full screen here.</p>
+        <p class="note">Or open <span id="pair-site"></span> on any phone, tablet or laptop and type:</p>
+        <div class="pair-code" id="pair-code"></div>
+        <button class="small" id="pair-close">Done</button>
+      </div>
+    </div>
+  </section>
+  </main>
+
+  <!-- Report: works from the room (about a person) or from Friends (any problem) -->
+  <form class="sheet report-panel" id="report-panel" hidden role="dialog" aria-labelledby="report-title" autocomplete="off">
+    <div class="invite-head"><h3 id="report-title">Report</h3><button type="button" class="small" id="report-cancel">Cancel</button></div>
+    <fieldset class="reasons">
+      <legend class="label">What's wrong?</legend>
+      <label><input type="radio" name="reason" value="harassment" checked> Harassment or bullying</label>
+      <label><input type="radio" name="reason" value="sexual"> Nudity or sexual content</label>
+      <label><input type="radio" name="reason" value="violence"> Violence or threats</label>
+      <label><input type="radio" name="reason" value="hate"> Hate speech</label>
+      <label><input type="radio" name="reason" value="child-safety"> A child at risk</label>
+      <label><input type="radio" name="reason" value="spam"> Spam or scams</label>
+      <label><input type="radio" name="reason" value="copyright"> Copyright</label>
+      <label><input type="radio" name="reason" value="other"> Something else</label>
+    </fieldset>
+    <label class="label" for="report-details">Anything else we should know? (optional)</label>
+    <textarea id="report-details" maxlength="2000" rows="3"></textarea>
+    <label class="check" id="report-block-row"><input type="checkbox" id="report-block" checked> Also block them</label>
+    <p class="note" id="report-note">Their last few chat messages are included so the report can be checked. If someone is in danger, call 999.</p>
+    <button class="primary big" type="submit" id="report-send">Send report</button>
+  </form>
+
+  <div class="toast" id="toast" role="status" hidden></div>
+</body>
+</html>

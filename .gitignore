@@ -1,0 +1,13 @@
+node_modules/
+.wrangler/
+.dev.vars
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+*.keystore
+*.jks
+*.apk
+.DS_Store
+__pycache__/
+*.aab

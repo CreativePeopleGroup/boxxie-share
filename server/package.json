@@ -1,0 +1,15 @@
+{
+  "name": "boxxie-share-server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "node --import ./test/register.mjs test/harness.mjs",
+    "test:live": "node test/smoke.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0",
+    "ws": "^8.18.0"
+  }
+}
