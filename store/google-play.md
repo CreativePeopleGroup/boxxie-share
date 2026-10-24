@@ -72,7 +72,13 @@ To test a room: tap Start sharing with any video, then on a second device join w
 
 **Photo and video permissions:** the Play version has none. Films are picked with Android's file picker.
 
-**Foreground service / exact alarms / location / contacts / SMS:** not used.
+**Foreground service (Media projection):** used. Play Console → App content → Foreground service permissions → tick **Media projection** and explain:
+```
+Boxxie Share lets you share your screen live with friends in a private room you control. While you share, a foreground service keeps the screen capture running so you can open other apps. It only runs after you press "Start sharing" and accept Android's screen-capture prompt, shows a notification the whole time, and stops when you press Stop sharing.
+```
+Google asks for a short video link showing it: record yourself pressing **Start sharing → TV screen**, accepting the prompt, pressing Home and opening another app.
+
+**Exact alarms / location / contacts / SMS:** not used.
 
 ## Data safety form
 

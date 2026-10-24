@@ -179,6 +179,20 @@ Open your website link in **Safari**, tap **Share → Add to Home Screen**. iPho
 **watch, chat and video call**. Apple doesn't allow web apps to share a film, so the host
 needs to be on Android, Fire TV or a computer.
 
+### Sharing your TV or phone screen (Android app)
+
+In the Boxxie Share app on Fire TV, Android TV or an Android phone, choose **TV screen** (or
+**Phone screen**) and press **Start sharing**. Accept Android's "Start recording or casting?"
+pop-up, then press **Home** and open any app: friends see it live, with sound on Android 10 and
+newer. Netflix, Prime and other paid apps show black: they block screen capture.
+
+While the TV shows another app, let people in from your **paired phone**: their requests appear
+there. Stop from the Boxxie Share app (**Stop sharing**) or the Android notification.
+
+Some 2025 Fire TV Sticks run Amazon's Vega system and can't install Android apps at all.
+iPhones and iPads can't share their screen from a website (Apple only allows it for App Store
+apps); they can watch, chat and call.
+
 ### Apple TV
 
 Apple TV has no web browser, and a native tvOS app would need a paid Apple developer
