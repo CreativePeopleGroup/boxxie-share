@@ -19,6 +19,11 @@ const CODE_LENGTH = 8; // 31^8 ≈ 852 billion combinations
 
 const ROOM_TTL_MS = 12 * 60 * 60 * 1000; // a room lasts at most 12 hours
 const HOST_GRACE_MS = 3 * 60 * 1000; // room survives a host drop-out for 3 minutes
+// When the film ends or sharing stops, the room closes itself after a countdown the host can cancel.
+const AUTO_END_MIN_MS = 15 * 1000;
+const AUTO_END_MAX_MS = 30 * 60 * 1000;
+const HOST_PHONE_ACTIONS = new Set(["approve", "deny", "kick", "auto-end", "end"]);
+const AUTO_END_REASONS = new Set(["finished", "idle"]);
 const DEFAULT_MAX_VIEWERS = 6; // direct streaming from home broadband
 const MAX_PENDING = 10;
 const MAX_NAME = 24;
@@ -415,6 +420,7 @@ export class Room extends DurableObject {
     }
     t.ws.serializeAttachment({ ...t.a, state: "approved" });
     this._send(t.ws, { type: "approved", iceServers: await iceServers(this.env) });
+    if (meta.endAt) this._send(t.ws, this._endingMsg(meta));
     const host = this._host();
     if (host) this._send(host.ws, { type: "viewer-ready", id: t.a.id, name: t.a.name });
     this._broadcastChat({ system: true, text: `${t.a.name} joined` });
@@ -542,9 +548,10 @@ export class Room extends DurableObject {
       if (meta.hostGoneAt) {
         delete meta.hostGoneAt;
         await this.ctx.storage.put("meta", meta);
-        await this.ctx.storage.setAlarm(meta.expiresAt);
+        await this._scheduleAlarm(meta);
       }
       this._send(server, { type: "welcome", role: "host", code: meta.code, iceServers: await iceServers(this.env) });
+      if (meta.endAt) this._send(server, this._endingMsg(meta));
       await this._pushRoster(meta);
       // Tell already-approved viewers the host is back so they can renegotiate.
       for (const v of this._approved()) this._send(v.ws, { type: "host-back" });
@@ -568,6 +575,7 @@ export class Room extends DurableObject {
       const id = randomId();
       server.serializeAttachment({ id, role: "viewer", name: entry.name, state: "approved", companionOf: entry.owner, userId: who && who.id });
       this._send(server, { type: "approved", companion: true, ownerName: entry.name, ownerId: entry.owner, iceServers: await iceServers(this.env) });
+      if (meta.endAt) this._send(server, this._endingMsg(meta));
       const h = this._host();
       if (h) this._send(h.ws, { type: "viewer-ready", id, name: entry.name, companionOf: entry.owner });
       const ownerSock = entry.owner === "host" ? h : this._byId(entry.owner);
@@ -634,7 +642,7 @@ export class Room extends DurableObject {
 
     // ----- host-only actions -----
     // The host's own paired phone may also let people in (the TV may be busy showing another app).
-    const hostPhone = a.role === "viewer" && a.state === "approved" && a.companionOf === "host" && (msg.type === "approve" || msg.type === "deny");
+    const hostPhone = a.role === "viewer" && a.state === "approved" && a.companionOf === "host" && HOST_PHONE_ACTIONS.has(msg.type);
     if (a.role === "host" || hostPhone) {
       switch (msg.type) {
         case "approve": {
@@ -652,7 +660,10 @@ export class Room extends DurableObject {
           try {
             t.ws.close(4003, msg.type);
           } catch {}
-          if (msg.type === "kick") this._send(ws, { type: "viewer-left", id: t.a.id });
+          if (msg.type === "kick") {
+            const h = this._host(); // tell the host even when their paired phone did the removing
+            if (h) this._send(h.ws, { type: "viewer-left", id: t.a.id });
+          }
           if (!t.a.companionOf) await this._dropCompanions(meta, t.a.id);
           return this._pushRoster(meta);
         }
@@ -663,6 +674,21 @@ export class Room extends DurableObject {
         }
         case "end": {
           return this._close("ended");
+        }
+        case "auto-end": {
+          // {after: ms, why: "finished"|"idle"} starts the countdown; {after: null} cancels it.
+          const after = Number(msg.after);
+          if (msg.after == null || !isFinite(after)) {
+            if (!meta.endAt) return;
+            meta.endAt = null;
+            meta.endWhy = null;
+          } else {
+            meta.endAt = Date.now() + Math.min(AUTO_END_MAX_MS, Math.max(AUTO_END_MIN_MS, after));
+            meta.endWhy = AUTO_END_REASONS.has(msg.why) ? msg.why : "finished";
+          }
+          await this.ctx.storage.put("meta", meta);
+          await this._scheduleAlarm(meta);
+          return this._broadcastEnding(meta);
         }
         case "signal": {
           const t = this._byId(msg.to);
@@ -731,7 +757,7 @@ export class Room extends DurableObject {
       // Give the host a few minutes to reconnect (e.g. TV Wi-Fi blip).
       meta.hostGoneAt = Date.now();
       await this.ctx.storage.put("meta", meta);
-      await this.ctx.storage.setAlarm(Date.now() + HOST_GRACE_MS);
+      await this._scheduleAlarm(meta);
       for (const v of this._approved()) this._send(v.ws, { type: "host-away" });
     } else if (a.role === "viewer") {
       const host = this._host();
@@ -752,7 +778,25 @@ export class Room extends DurableObject {
     if (meta.hostGoneAt && !this._host() && now - meta.hostGoneAt >= HOST_GRACE_MS) {
       return this._close("host-left");
     }
-    await this.ctx.storage.setAlarm(meta.hostGoneAt ? meta.hostGoneAt + HOST_GRACE_MS : meta.expiresAt);
+    if (meta.endAt && now >= meta.endAt) return this._close(meta.endWhy || "finished");
+    await this._scheduleAlarm(meta);
+  }
+
+  // One alarm covers the earliest of: room expiry, host grace period, end-of-film countdown.
+  async _scheduleAlarm(meta) {
+    let at = meta.expiresAt;
+    if (meta.hostGoneAt) at = Math.min(at, meta.hostGoneAt + HOST_GRACE_MS);
+    if (meta.endAt) at = Math.min(at, meta.endAt);
+    await this.ctx.storage.setAlarm(Math.max(at, Date.now() + 50));
+  }
+  _endingMsg(meta) {
+    return { type: "ending", in: meta.endAt ? Math.max(0, meta.endAt - Date.now()) : null, why: meta.endWhy || null };
+  }
+  _broadcastEnding(meta) {
+    const msg = this._endingMsg(meta);
+    const h = this._host();
+    if (h) this._send(h.ws, msg);
+    for (const v of this._approved()) this._send(v.ws, msg);
   }
 
   async _close(reason) {

@@ -28,7 +28,12 @@ class Storage {
   async put(k, v) { this.map.set(k, structuredClone(v)); }
   async delete(k) { this.map.delete(k); }
   async deleteAll() { this.map.clear(); }
-  async setAlarm() {}
+  // Runs the object's alarm() like Cloudflare does (only times within an hour; room expiry is ignored).
+  async setAlarm(t) {
+    clearTimeout(this.timer);
+    const ms = t - Date.now();
+    if (this.owner && ms < 60 * 60 * 1000) this.timer = setTimeout(() => this.owner.alarm?.(), Math.max(0, ms));
+  }
 }
 function namespace(Cls, env) {
   const objects = new Map();
@@ -43,6 +48,7 @@ function namespace(Cls, env) {
           getWebSockets: (tag) => sockets.filter((s) => !s._closed && (!tag || (s._tags || []).includes(tag))),
         };
         const obj = new Cls(ctx, env);
+        ctx.storage.owner = obj;
         objects.set(id, obj);
       }
       return objects.get(id);

@@ -715,3 +715,12 @@ textarea:focus { border-color: rgba(239, 203, 153, 0.6); outline: none; }
 .totp-panel .otp { font-size: 1.1rem; }
 @media (max-width: 520px) { .totp-setup { flex-direction: column; } }
 .code-input.newcode { font-size: clamp(1rem, 5vw, 1.6rem); letter-spacing: 0.03em; padding: 0 6px; text-overflow: clip; }
+
+/* ----- End of the film: the room closes itself after a countdown ----- */
+.end-card { text-align: center; align-items: center; z-index: 30; padding: 28px 24px; }
+.end-card h3 { margin: 0; font-size: 1.5rem; }
+.end-card p { margin: 0; color: var(--muted); }
+.end-card #end-count { color: var(--text, #f6f1ea); font-variant-numeric: tabular-nums; }
+.end-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; width: 100%; }
+.end-actions button { min-height: 48px; border-radius: 14px; flex: 1 1 200px; justify-content: center; }
+.end-actions button[hidden] { display: none; }

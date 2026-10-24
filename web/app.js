@@ -920,6 +920,7 @@
     $("stage-empty-text").textContent = "You've stopped sharing. Friends are still in the room.";
     $("screen-status").textContent = "Not sharing";
     syncFilmToAll();
+    autoEnd("idle");
     $("ctl-reshare").focus();
   }
   $("ctl-reshare").onclick = async () => {
@@ -988,6 +989,7 @@
     setLabel($("ctl-reshare"), "Open another app");
     try { NATIVE.setIceServers(JSON.stringify(S.ice || [])); } catch {}
     syncFilmToAll();
+    if (S.endingWhy) autoEnd(null);
   }
   function nativeStopped() {
     S.nativeSharing = false;
@@ -995,6 +997,7 @@
     $("stage-empty-text").textContent = "You've stopped sharing. Friends are still in the room.";
     $("screen-status").textContent = "Not sharing";
     setLabel($("ctl-reshare"), "Share the screen again");
+    autoEnd("idle");
   }
 
   // Viewer: the app's screen arrives on its own connection
@@ -1260,17 +1263,22 @@
         banner("");
         resetPeer("host");
         return;
+      case "ending":
+        showEnding(m.in, m.why);
+        return;
       case "room-closed":
         S.closing = true;
         if (S.role === "host") {
           cleanup();
           show("home");
-          toast(m.reason === "expired" ? "The room reached its 12-hour limit and closed." : "Room closed.");
+          toast({ expired: "The room reached its 12-hour limit and closed.", finished: "The film finished and the room closed.", idle: "Sharing stopped, so the room closed." }[m.reason] || "Room closed.");
         } else {
           const why = {
             expired: "The room reached its 12-hour limit.",
             "paired-left": "The TV this device was paired with has left the room.",
             "paired-elsewhere": "Another device has been paired with the TV instead.",
+            finished: "The film has finished. Thanks for watching!",
+            idle: "The host stopped sharing, so the room closed. Thanks for watching!",
           }[m.reason] || "The host has ended the session. Thanks for watching.";
           endWithMessage(m.reason && m.reason.startsWith("paired") ? "Call ended" : "The room has closed", why);
         }
@@ -1532,7 +1540,7 @@
     const tagFor = (id, base) => [base, phones.has(id) ? "on phone" : ""].filter(Boolean).join(" · ");
     list.append(chip(S.myName, S.companion ? "you · call on this device" : tagFor(myId, asHost ? "you · sharing" : "you"), 0, null, S.session && S.session.user.photo));
     watchers.forEach((p, i) => {
-      const open = () => openPerson(p, asHost);
+      const open = () => openPerson(p, asHost || (canControlRoom() && !p.host));
       const c = chip(p.name, tagFor(p.id, p.host ? "sharing" : ""), i + 1, open, p.photo);
       c.title = `${p.name}: remove, block or report`;
       c.setAttribute("aria-label", `${p.name}. Press to remove, block or report`);
@@ -2108,7 +2116,13 @@
       $("ctl-seek").style.setProperty("--pct", `${(filmVideo.currentTime / filmVideo.duration) * 100}%`);
     }
   });
-  filmVideo.addEventListener("ended", () => S.role === "host" && send({ type: "chat", text: "The film has finished 🎬" }));
+  filmVideo.addEventListener("ended", () => {
+    if (S.role !== "host" || S.source === "screen") return;
+    send({ type: "chat", text: "The film has finished 🎬" });
+    autoEnd("finished");
+  });
+  // Playing again (or sharing something new) cancels the countdown
+  filmVideo.addEventListener("playing", () => S.role === "host" && S.endingWhy && autoEnd(null));
 
   // Remote-control media keys work anywhere in the room
   document.addEventListener("keydown", (e) => {
@@ -2252,6 +2266,48 @@
     else if (filmVideo.webkitEnterFullscreen) filmVideo.webkitEnterFullscreen(); // iPhone
   };
 
+  // ---------------- the room closes itself when the film is over ----------------
+  // Film or audio ends: everyone gets a 1-minute countdown. Host stops sharing: 10 minutes.
+  // The host (or their paired phone) can keep the room open or close it straight away.
+  const AUTO_END = Object.assign({ finished: 60 * 1000, idle: 10 * 60 * 1000 }, window.__boxxieAutoEnd || {}); // tests shorten these
+  let endTimer = null;
+  function autoEnd(why) {
+    if (S.role !== "host") return;
+    send(why ? { type: "auto-end", after: AUTO_END[why], why } : { type: "auto-end", after: null });
+  }
+  const canControlRoom = () => S.role === "host" || (S.companion && S.companionOwner === "host");
+  function showEnding(ms, why) {
+    clearInterval(endTimer);
+    S.endingWhy = ms == null ? null : why;
+    const card = $("end-card");
+    if (ms == null) {
+      card.hidden = true;
+      return;
+    }
+    const until = Date.now() + ms;
+    const ctrl = canControlRoom();
+    $("end-title").textContent = why === "idle" ? "Sharing has stopped" : "The film has finished";
+    $("end-keep").hidden = !ctrl;
+    $("end-now").hidden = !ctrl;
+    $("end-leave").hidden = ctrl;
+    const tick = () => {
+      const left = Math.max(0, Math.ceil((until - Date.now()) / 1000));
+      $("end-count").textContent = fmtTime(left);
+      $("end-text").firstChild.textContent = why === "idle" && S.role === "host" ? "Share again, or the room closes in " : "Everyone leaves the room in ";
+    };
+    tick();
+    endTimer = setInterval(tick, 500);
+    // On the host's own screen, don't cover the film-idle controls: the card sits over the empty stage.
+    card.hidden = false;
+    if (isTV || !document.activeElement || document.activeElement === document.body) (ctrl ? $("end-keep") : $("end-leave")).focus();
+  }
+  $("end-keep").onclick = () => {
+    send({ type: "auto-end", after: null });
+    $("end-card").hidden = true;
+  };
+  $("end-now").onclick = () => send({ type: "end" });
+  $("end-leave").onclick = () => leave();
+
   // ---------------- leaving ----------------
   $("leave").onclick = () => {
     if (S.role === "host") {
@@ -2263,6 +2319,9 @@
 
   function cleanup() {
     S.closing = true;
+    clearInterval(endTimer);
+    S.endingWhy = null;
+    $("end-card").hidden = true;
     clearInterval(S.pingTimer);
     for (const id of [...S.peers.keys()]) closePeer(id);
     for (const id of [...screenPeers.keys()]) closeScreenPeer(id);

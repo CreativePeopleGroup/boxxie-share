@@ -501,6 +501,16 @@
       <p class="note">Talk on the call with headphones or a second phone, so the TV doesn't echo.</p>
     </div>
 
+    <div class="sheet end-card" id="end-card" hidden role="alertdialog" aria-labelledby="end-title" aria-describedby="end-text">
+      <h3 id="end-title">The film has finished</h3>
+      <p id="end-text">Everyone leaves the room in <strong id="end-count">1:00</strong>.</p>
+      <div class="end-actions">
+        <button class="primary" id="end-keep">Keep the room open</button>
+        <button id="end-now" class="deny-strong">Close the room now</button>
+        <button class="primary" id="end-leave">Leave now</button>
+      </div>
+    </div>
+
     <div class="sheet person-panel" id="person-panel" hidden role="dialog" aria-labelledby="person-name">
       <div class="invite-head"><h3 id="person-name"></h3><button class="small" id="person-close">Done</button></div>
       <div class="person-actions">
