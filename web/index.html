@@ -157,6 +157,7 @@
   <!-- ============ Sign in ============ -->
   <section class="screen signin" id="screen-signin" data-screen="signin" hidden>
     <div class="signin-box">
+      <div class="signin-col signin-left">
       <h1 class="wordmark"><img src="icons/boxxie-logo.png" alt="boxxie" width="405" height="160"><span class="share">share</span></h1>
       <h2>Sign in</h2>
       <p class="muted">Everyone signs in, so only people you know can join your rooms.</p>
@@ -170,6 +171,8 @@
           <p class="note" id="signin-tv-status">Waiting for your phone…</p>
         </div>
       </div>
+      </div>
+      <div class="signin-col signin-right">
 
       <div class="signin-buttons" id="signin-social">
         <button class="social google" id="signin-google" hidden><span class="logo" aria-hidden="true">G</span>Continue with Google</button>
@@ -216,6 +219,7 @@
       </form>
       <p class="error" id="signin-error" role="alert" hidden></p>
       <p class="note">By signing in you agree to the <a href="terms.html" target="_blank" rel="noopener">Terms of use</a>, including zero tolerance for abusive or illegal content, and the <a href="privacy.html" target="_blank" rel="noopener">Privacy policy</a>.</p>
+      </div>
     </div>
   </section>
 
@@ -280,6 +284,26 @@
           <input id="rename-input" maxlength="40" aria-label="Your name">
           <button type="submit">Save</button>
         </form>
+      </div>
+      <div class="card">
+        <div id="friend-requests-wrap" hidden>
+          <h3>Friend requests</h3>
+          <ul class="friend-list" id="friend-requests"></ul>
+        </div>
+        <h3>Your friends</h3>
+        <ul class="friend-list" id="friend-list"></ul>
+        <p class="muted" id="friends-empty">No friends yet. Add someone with their friend code.</p>
+        <div id="friend-sent-wrap" hidden>
+          <h3>Waiting for them to accept</h3>
+          <ul class="friend-list" id="friend-sent"></ul>
+        </div>
+        <div id="blocked-wrap" hidden>
+          <h3>Blocked</h3>
+          <p class="note">Blocked people can't send you friend requests, invite you, join your rooms, or appear in your chat.</p>
+          <ul class="friend-list" id="blocked-list"></ul>
+        </div>
+      </div>
+      <div class="card account-card">
         <h3>Your account</h3>
         <p class="note">Signed in as <span id="me-email"></span>. <a href="terms.html" target="_blank" rel="noopener">Terms</a> · <a href="privacy.html" target="_blank" rel="noopener">Privacy</a></p>
         <button class="small" id="report-problem">Report a problem or abuse</button>
@@ -315,24 +339,6 @@
           <p class="note" id="totp-msg" role="status"></p>
         </div>
         <button class="small deny" id="delete-account">Delete my account</button>
-      </div>
-      <div class="card">
-        <div id="friend-requests-wrap" hidden>
-          <h3>Friend requests</h3>
-          <ul class="friend-list" id="friend-requests"></ul>
-        </div>
-        <h3>Your friends</h3>
-        <ul class="friend-list" id="friend-list"></ul>
-        <p class="muted" id="friends-empty">No friends yet. Add someone with their friend code.</p>
-        <div id="friend-sent-wrap" hidden>
-          <h3>Waiting for them to accept</h3>
-          <ul class="friend-list" id="friend-sent"></ul>
-        </div>
-        <div id="blocked-wrap" hidden>
-          <h3>Blocked</h3>
-          <p class="note">Blocked people can't send you friend requests, invite you, join your rooms, or appear in your chat.</p>
-          <ul class="friend-list" id="blocked-list"></ul>
-        </div>
       </div>
     </div>
   </section>

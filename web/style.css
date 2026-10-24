@@ -750,3 +750,18 @@ textarea:focus { border-color: rgba(239, 203, 153, 0.6); outline: none; }
 .update-btn[hidden] { display: none; }
 .app-version { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--hair-2, rgba(255,255,255,0.08)); }
 .app-version[hidden] { display: none; }
+
+/* ----- Sign-in: one column on phones and computers; side by side on TVs ----- */
+.signin-col { display: contents; }
+.tv .signin { place-items: center; padding: 32px 48px; }
+.tv .signin-box { max-width: 1180px; margin-top: 0; flex-direction: row; gap: 48px; padding: 36px 44px; align-items: stretch; }
+.tv .signin-col { display: flex; flex-direction: column; gap: 14px; flex: 1 1 0; min-width: 0; }
+.tv .signin-right { justify-content: center; border-left: 1px solid var(--hair); padding-left: 48px; }
+.tv .signin-box h2 { font-size: 2rem; }
+.tv .signin-tv { flex: 1; align-items: center; }
+.tv .signin-tv .pair-qr svg { width: 200px; height: 200px; }
+.tv .signin-tv .pair-code { font-size: 1.9rem; }
+.tv .signin-tv #signin-site { word-break: break-all; }
+
+/* Friends page: friend code + add on the left; friends, then account and sign-in settings on the right */
+@media (min-width: 761px) { .friends-grid > .card:first-child { grid-row: span 2; } }

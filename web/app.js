@@ -32,13 +32,14 @@
   // for 1280×720 and scale down to fit exactly, so nothing ever needs scrolling.
   const root = document.documentElement;
   function shrinkToFit() {
-    // Still taller than the screen (long names, invitations, big system font)? Shrink a bit more.
+    // Home and sign-in are one screen each: still taller than the TV? Shrink a bit more (not too far).
+    // Longer pages like Friends scroll instead, so their text stays readable.
     const scr = [...document.querySelectorAll(".screen")].find((x) => !x.hidden);
-    if (!scr || scr.classList.contains("room")) return;
+    if (!scr || !["home", "signin"].includes(scr.dataset.screen)) return;
     const h = root.scrollHeight;
     if (h > innerHeight + 1) {
       const z = Number(getComputedStyle(root).getPropertyValue("--tvz")) || 1;
-      root.style.setProperty("--tvz", String(Math.floor(z * (innerHeight / h) * 1000) / 1000));
+      root.style.setProperty("--tvz", String(Math.max(0.6, Math.floor(z * (innerHeight / h) * 1000) / 1000)));
     }
   }
   function fitTV() {
