@@ -151,9 +151,34 @@ function json(data, status, request, env) {
 
 // Short-lived TURN credentials (Cloudflare Realtime TURN, 1,000 GB/month free).
 // Without TURN keys configured we fall back to free STUN, which works for most home connections.
+// Backup relay until Cloudflare TURN is set up: the Open Relay Project's free public relay
+// (metered.ca, 20 GB a month), using its published shared secret to make short-lived logins.
+// Media stays end-to-end encrypted (DTLS-SRTP), so a relay only passes it on. OPEN_RELAY=off disables.
+async function openRelay(env) {
+  if (env.OPEN_RELAY === "off") return [];
+  const host = "staticauth.openrelay.metered.ca";
+  const username = `${Math.floor(Date.now() / 1000) + 12 * 60 * 60}:boxxie`;
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(env.OPEN_RELAY_SECRET || "openrelayprojectsecret"), { name: "HMAC", hash: "SHA-1" }, false, ["sign"]);
+  const sig = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(username)));
+  const credential = btoa(String.fromCharCode(...sig));
+  return [
+    {
+      urls: [`turn:${host}:80`, `turn:${host}:80?transport=tcp`, `turn:${host}:443`, `turns:${host}:443?transport=tcp`],
+      username,
+      credential,
+    },
+  ];
+}
+
 async function iceServers(env) {
   const stun = [{ urls: ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"] }];
-  if (!env.TURN_KEY_ID || !env.TURN_KEY_API_TOKEN) return stun;
+  if (!env.TURN_KEY_ID || !env.TURN_KEY_API_TOKEN) {
+    try {
+      return [...stun, ...(await openRelay(env))];
+    } catch {
+      return stun;
+    }
+  }
   try {
     const res = await fetch(
       `https://rtc.live.cloudflare.com/v1/turn/keys/${env.TURN_KEY_ID}/credentials/generate-ice-servers`,
