@@ -768,7 +768,7 @@ textarea:focus { border-color: rgba(239, 203, 153, 0.6); outline: none; }
 
 /* ----- TV: pick one of the TV's apps to open while sharing ----- */
 .sheet.apps-panel { width: min(1040px, calc(100% - 48px)); }
-.apps-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; max-height: 56vh; overflow-y: auto; padding: 4px; }
+.apps-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; max-height: 62vh; overflow-y: auto; padding: 6px; scroll-padding: 8px; }
 .app-tile { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; min-height: 132px; padding: 14px 10px; border-radius: 18px; background: var(--raised); color: var(--text, #f6f1ea); font-weight: 600; font-size: 0.92rem; text-align: center; line-height: 1.2; }
 .app-tile img, .app-tile .app-home { width: 56px; height: 56px; border-radius: 14px; object-fit: contain; }
 .app-tile .app-home { display: grid; place-items: center; background: var(--card); }

@@ -64,7 +64,8 @@
     goHome: () => window.__nativeCalls.push("home"),
     networkInfo: () => JSON.stringify({ vpn: !!window.__fakeVpn, wifi: true, ethernet: false }),
     isSharing: () => !!sessionStorage.getItem("fakeSharing"),
-    listApps: () => JSON.stringify([{ pkg: "com.example.player", label: "Home Videos", icon: "" }, { pkg: "com.example.music", label: "Music", icon: "" }]),
+    listApps: () => JSON.stringify([{ pkg: "com.example.player", label: "Home Videos", icon: "" }, { pkg: "com.example.music", label: "Music", icon: "" }]
+      .concat(window.__manyApps ? Array.from({ length: 22 }, (_, i) => ({ pkg: "com.example.app" + i, label: "App " + String(i).padStart(2, "0"), icon: "" })).concat([{ pkg: "com.streamteam", label: "The Stream Team", icon: "" }]) : [])),
     launchApp: (pkg) => window.__nativeCalls.push("launch:" + pkg),
     // Update button stand-in: pretends 1.0.6 is out; window.__updateNone = true means up to date
     appInfo: () => JSON.stringify({ code: 5, name: "1.0.5", canUpdate: true }),

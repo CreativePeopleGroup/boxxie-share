@@ -1105,7 +1105,7 @@
       t.textContent = label;
       b.append(t);
       b.onclick = () => {
-        $("apps-panel").hidden = true;
+        closeApps();
         onPick();
       };
       return b;
@@ -1121,13 +1121,44 @@
       grid.append(tile(a.label || a.pkg, img, () => NATIVE.launchApp(a.pkg)));
     }
     $("apps-panel").hidden = false;
+    // While the list is open, the remote only moves around the list (not the buttons behind it)
+    for (const el of $("screen-room").children) if (el.id !== "apps-panel") el.inert = true;
     const first = grid.querySelectorAll(".app-tile")[1] || grid.querySelector(".app-tile");
     if (first) first.focus();
   }
-  $("apps-close").onclick = () => {
+  function closeApps() {
+    for (const el of $("screen-room").children) el.inert = false;
     $("apps-panel").hidden = true;
+  }
+  $("apps-close").onclick = () => {
+    closeApps();
     $("ctl-reshare").focus();
   };
+  // Remote arrows: move tile by tile, scrolling the list so every app can be reached
+  $("apps-grid").addEventListener("keydown", (e) => {
+    const keys = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: "up", ArrowDown: "down" };
+    if (!(e.key in keys)) return;
+    const tiles = [...$("apps-grid").querySelectorAll(".app-tile")];
+    const i = tiles.indexOf(document.activeElement);
+    if (i < 0) return;
+    const cols = Math.max(1, tiles.filter((t) => t.offsetTop === tiles[0].offsetTop).length);
+    let j = i;
+    if (keys[e.key] === "up") j = i - cols;
+    else if (keys[e.key] === "down") j = Math.min(tiles.length - 1, i + cols);
+    else j = i + keys[e.key];
+    e.preventDefault();
+    if (j < 0) return $("apps-close").focus();
+    if (j >= tiles.length) return;
+    tiles[j].focus();
+    tiles[j].scrollIntoView({ block: "nearest" });
+  });
+  $("apps-close").addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      const t = $("apps-grid").querySelector(".app-tile");
+      if (t) t.focus();
+    }
+  });
 
   // ----- TV app: if Android restarts Boxxie's page while you're sharing, go straight back in -----
   function rememberTVRoom() {
@@ -2747,6 +2778,16 @@
     const name = current && current.dataset.screen;
     if (!name || name === "home") return false;
     if (name === "room") {
+      // Back closes an open panel first (app list, invite, etc.)
+      if (!$("apps-panel").hidden) {
+        $("apps-close").click();
+        return true;
+      }
+      const sheet = [...document.querySelectorAll("#screen-room .sheet")].find((x) => !x.hidden);
+      if (sheet) {
+        sheet.hidden = true;
+        return true;
+      }
       if (S.role === "host") $("leave").click(); // asks "End the room for everyone?"
       else if (confirm("Leave the room?")) leave();
       return true;
