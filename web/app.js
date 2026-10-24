@@ -1257,12 +1257,15 @@
   async function screenDiag(sp) {
     if (screenPeers.get(sp.from) !== sp) return;
     let frames = 0, bytes = 0;
+    const mine = new Set(), theirs = new Set();
     try {
       (await sp.pc.getStats()).forEach((r) => {
         if (r.type === "inbound-rtp" && r.kind === "video") {
           frames += r.framesDecoded || 0;
           bytes += r.bytesReceived || 0;
         }
+        if (r.type === "local-candidate") mine.add(r.candidateType);
+        if (r.type === "remote-candidate") theirs.add(r.candidateType);
       });
     } catch {}
     const el = $("screen-diag");
@@ -1277,7 +1280,9 @@
     else msg = "Connecting to the TV's picture…";
     el.replaceChildren(document.createTextNode(msg));
     const small = document.createElement("small");
-    small.textContent = `Network: ${ice} · received ${Math.round(bytes / 1024)} KB`;
+    // relay = the relay server answered; srflx = internet address found; host = local network only
+    const kinds = (set) => ["relay", "srflx", "host", "prflx"].filter((k) => set.has(k)).join("+") || "none";
+    small.textContent = `Network: ${ice} · received ${Math.round(bytes / 1024)} KB · relay: ${mine.has("relay") ? "yes" : "no"} · you: ${kinds(mine)} · TV: ${kinds(theirs)}`;
     el.append(small);
     el.hidden = false;
   }
