@@ -80,6 +80,36 @@ jobs:
           echo "deployment-url=$URL" >> "$GITHUB_OUTPUT"
           echo "::notice::Server address: $URL"
 
+      # Optional settings: add any of these as GitHub repository secrets and they're passed to the
+      # server on every deploy. BREVO_API_KEY + EMAIL_FROM switch on email sign-in codes.
+      - name: Send settings to the server
+        working-directory: server
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          S_EMAIL_API_KEY: ${{ secrets.BREVO_API_KEY }}
+          S_EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          S_ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+          S_REPORT_EMAIL: ${{ secrets.REPORT_EMAIL }}
+          S_REVIEW_EMAIL: ${{ secrets.REVIEW_EMAIL }}
+          S_REVIEW_CODE: ${{ secrets.REVIEW_CODE }}
+          S_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          S_GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          S_FACEBOOK_APP_ID: ${{ secrets.FACEBOOK_APP_ID }}
+          S_FACEBOOK_APP_SECRET: ${{ secrets.FACEBOOK_APP_SECRET }}
+          S_TURN_KEY_ID: ${{ secrets.TURN_KEY_ID }}
+          S_TURN_KEY_API_TOKEN: ${{ secrets.TURN_KEY_API_TOKEN }}
+        run: |
+          if [ -n "$S_EMAIL_API_KEY" ]; then export S_EMAIL_PROVIDER=brevo; fi
+          set_count=0
+          for n in EMAIL_PROVIDER EMAIL_API_KEY EMAIL_FROM ADMIN_TOKEN REPORT_EMAIL REVIEW_EMAIL REVIEW_CODE GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET FACEBOOK_APP_ID FACEBOOK_APP_SECRET TURN_KEY_ID TURN_KEY_API_TOKEN; do
+            v="$(printenv "S_$n" || true)"
+            [ -z "$v" ] && continue
+            printf '%s' "$v" | npx --yes wrangler@4 secret put "$n" > /dev/null
+            echo "Set $n"; set_count=$((set_count+1))
+          done
+          echo "::notice::Server settings sent: $set_count"
+
       - name: Show the server address
         run: |
           echo "### Server deployed" >> "$GITHUB_STEP_SUMMARY"

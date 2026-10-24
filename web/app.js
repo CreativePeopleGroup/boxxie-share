@@ -400,6 +400,9 @@
     $("email-form").hidden = !prov.email;
     $("signin-or").hidden = !prov.email || (inApp ? false : !(prov.google || prov.facebook));
     if (!SERVER) showError($("signin-error"), ERRORS.no_server);
+    else if (r.ok && !prov.email && !prov.google && !prov.facebook)
+      showError($("signin-error"), "Sign-in isn't switched on yet. Whoever runs this Boxxie Share needs to add an email, Google or Facebook key (README, Step 5).");
+    else if (!r.ok) showError($("signin-error"), "Can't reach the Boxxie Share server right now. Check your internet connection and try again.");
     if (isTV || inApp) startDeviceSignin();
     setTimeout(() => (isTV ? $("email-send") : $("signin-google").hidden ? $("signin-email") : $("signin-google")).focus(), 60);
   }
