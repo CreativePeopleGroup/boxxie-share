@@ -1,0 +1,9 @@
+Here's how Boxxie Share works on your Android TV. You can share anything that's on your TV with your friends, live.
+Open Boxxie Share on the TV, choose TV screen, pick your picture quality, and press Start sharing.
+Android will ask if Boxxie Share can record your screen. Choose Start now. You'll see this each time you start sharing.
+Your room is ready. Send the room code to your friends by WhatsApp or iMessage, or they can scan the QR code.
+When a friend asks to join, you'll see their name. Press Let in. Nobody gets in without your OK.
+Now press Home on your remote and open any app, like your home videos. Boxxie Share keeps sharing in the background.
+Your friends see and hear exactly what's on your TV, live, on their phone, laptop, iPad, or their own TV.
+If someone new asks to join while you're watching, let them in from your paired phone. It also runs the video call, chat and remote.
+When you're done, go back to Boxxie Share and press Stop sharing. Your friends stay in the room until you share again.

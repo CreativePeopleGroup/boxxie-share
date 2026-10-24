@@ -1,0 +1,32 @@
+name: Voiceover (temporary)
+on:
+  push:
+    branches: [voiceover-tmp]
+    paths: [voiceover/script.txt, .github/workflows/voiceover.yml]
+permissions:
+  contents: write
+jobs:
+  tts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install kokoro-onnx soundfile
+      - run: |
+          curl -sSLO https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx
+          curl -sSLO https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin
+      - run: |
+          python - <<'P'
+          import soundfile as sf
+          from kokoro_onnx import Kokoro
+          k = Kokoro("kokoro-v1.0.onnx", "voices-v1.0.bin")
+          lines = [l.strip() for l in open("voiceover/script.txt") if l.strip()]
+          for voice in ["bf_emma", "bm_george"]:
+              for i, t in enumerate(lines):
+                  a, sr = k.create(t, voice=voice, speed=1.0, lang="en-gb")
+                  sf.write(f"voiceover/{voice}-{i:02d}.wav", a, sr)
+          P
+      - run: |
+          git config user.name "github-actions"; git config user.email "actions@github.com"
+          git add voiceover/*.wav && git commit -m "Voiceover audio" && git push
