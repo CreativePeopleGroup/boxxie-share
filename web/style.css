@@ -743,3 +743,10 @@ textarea:focus { border-color: rgba(239, 203, 153, 0.6); outline: none; }
 .tv .room :is(.overlay, .faces, .chat-toasts, .dock, .sheet, .requests, .stage-empty-in, .banner), .tv .toast { zoom: var(--tvz, 1); }
 .tv .room ~ .toast, .tv .toast { bottom: auto; top: 24px; left: 50%; right: auto; transform: translateX(-50%); }
 .tv .chat-toasts { bottom: auto; top: 96px; }
+
+/* ----- TV / Android app: update button (Downloader build) ----- */
+.update-btn { background: linear-gradient(135deg, var(--sand, #efcb99), #f3b38a); color: #1b1410; font-weight: 700; box-shadow: 0 6px 18px rgba(239, 203, 153, 0.25); }
+.update-btn svg { stroke: currentColor; }
+.update-btn[hidden] { display: none; }
+.app-version { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--hair-2, rgba(255,255,255,0.08)); }
+.app-version[hidden] { display: none; }

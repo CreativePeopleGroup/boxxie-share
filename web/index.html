@@ -32,6 +32,7 @@
       <symbol id="i-fwd30" viewBox="0 0 24 24"><path d="M12 5a7 7 0 1 0 6.6 4.7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M12 2.5 15.5 5 12 7.5z" fill="currentColor"/><text x="12" y="15.6" text-anchor="middle" font-size="7" font-weight="700" font-family="Montserrat,Arial,sans-serif" fill="currentColor">30</text></symbol>
       <symbol id="i-full" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></symbol>
       <symbol id="i-chat" viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8l-5 3.5V17H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+      <symbol id="i-update" viewBox="0 0 24 24"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19h14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></symbol>
       <symbol id="i-share" viewBox="0 0 24 24"><path d="M12 3v12M7.5 7.5 12 3l4.5 4.5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></symbol>
       <symbol id="i-people" viewBox="0 0 24 24"><circle cx="9" cy="8.5" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3 19c.6-3.3 3-5 6-5s5.4 1.7 6 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M17 5.5v6M14 8.5h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
       <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
@@ -62,6 +63,7 @@
     <header class="topbar">
       <h1 class="wordmark"><img src="icons/boxxie-logo.png" alt="boxxie" width="405" height="160"><span class="share">share</span></h1>
       <div class="account" id="account">
+        <button class="small update-btn" id="update-btn" hidden><svg><use href="#i-update"/></svg><span>Update</span></button>
         <span class="chip me-chip"><span class="av" id="me-av"></span><span class="nm" id="me-name"></span></span>
         <span class="nav-btn nav-current" aria-current="page"><svg><use href="#i-home"/></svg><span class="nav-lbl">Home</span></span>
         <button class="small nav-btn" id="go-friends"><svg><use href="#i-people"/></svg><span class="nav-lbl">Friends</span><span class="badge" id="friends-badge" hidden></span></button>
@@ -281,6 +283,10 @@
         <h3>Your account</h3>
         <p class="note">Signed in as <span id="me-email"></span>. <a href="terms.html" target="_blank" rel="noopener">Terms</a> · <a href="privacy.html" target="_blank" rel="noopener">Privacy</a></p>
         <button class="small" id="report-problem">Report a problem or abuse</button>
+        <div class="app-version" id="app-version" hidden>
+          <span class="note" id="app-version-text">Boxxie Share</span>
+          <button class="small" id="update-check" type="button">Check for updates</button>
+        </div>
         <h3>Signing in</h3>
         <div class="security-rows">
           <div class="sec-row">

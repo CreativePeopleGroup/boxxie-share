@@ -51,5 +51,16 @@
       pcs.clear(); clearInterval(timer); if (stream) stream.getTracks().forEach((t) => t.stop()); stream = null;
     },
     goHome: () => window.__nativeCalls.push("home"),
+    // Update button stand-in: pretends 1.0.6 is out; window.__updateNone = true means up to date
+    appInfo: () => JSON.stringify({ code: 5, name: "1.0.5", canUpdate: true }),
+    checkUpdate: () => {
+      window.__nativeCalls.push("check-update");
+      const none = !!window.__updateNone;
+      setTimeout(() => window.boxxieNativeEvent(JSON.stringify({ type: "update", available: !none, name: none ? "1.0.5" : "1.0.6", current: "1.0.5" })), 50);
+    },
+    installUpdate: () => {
+      window.__nativeCalls.push("install-update");
+      [10, 50, 100].forEach((pct, i) => setTimeout(() => window.boxxieNativeEvent(JSON.stringify({ type: "update-progress", pct })), 100 * (i + 1)));
+    },
   };
 })();

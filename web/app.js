@@ -979,6 +979,56 @@
     stoppedSharing();
   };
 
+  // ----- Android app (Fire TV / Downloader build): Update button -----
+  // The app checks the latest GitHub release; pressing Update downloads it and Android asks to install.
+  const APP = (() => {
+    try { return NATIVE && typeof NATIVE.appInfo === "function" ? JSON.parse(NATIVE.appInfo()) : null; } catch { return null; }
+  })();
+  let manualCheck = false;
+  let updating = false;
+  function checkForUpdate(manual) {
+    if (!APP || !APP.canUpdate) return;
+    manualCheck = !!manual;
+    try { NATIVE.checkUpdate(); } catch {}
+  }
+  function updateLabel(text) {
+    setLabel($("update-btn"), text);
+  }
+  function onUpdateEvent(ev) {
+    const btn = $("update-btn");
+    if (ev.type === "update") {
+      const avail = !!ev.available;
+      btn.hidden = !avail;
+      if (avail && !updating) updateLabel(ev.name ? `Update to ${ev.name}` : "Update");
+      $("app-version-text").textContent = `Boxxie Share ${ev.current || APP.name}` + (avail ? ` · ${ev.name || "an update"} is ready` : ev.failed ? "" : " · up to date");
+      if (manualCheck) toast(avail ? "An update is ready. Press Update at the top." : ev.failed ? "Couldn't check for updates. Try again in a moment." : "You have the latest version.");
+      manualCheck = false;
+    } else if (ev.type === "update-progress") {
+      updateLabel(ev.pct >= 100 ? "Installing…" : `Downloading ${ev.pct || 0}%`);
+    } else if (ev.type === "update-permission") {
+      updating = false;
+      updateLabel("Update");
+      toast("Turn on Boxxie Share in this list, press Back, then press Update again.", 9000);
+    } else if (ev.type === "update-error") {
+      updating = false;
+      updateLabel("Try the update again");
+      toast(ev.message || "The update didn't work. Try again.", 9000);
+    }
+  }
+  if (APP && APP.canUpdate) {
+    $("app-version").hidden = false;
+    $("app-version-text").textContent = `Boxxie Share ${APP.name}`;
+    checkForUpdate(false);
+    setInterval(() => checkForUpdate(false), 6 * 60 * 60 * 1000);
+  }
+  $("update-check").onclick = () => checkForUpdate(true);
+  $("update-btn").onclick = () => {
+    if (updating) return;
+    updating = true;
+    updateLabel("Starting…");
+    try { NATIVE.installUpdate(); } catch { updating = false; }
+  };
+
   // ----- Android app: whole-screen sharing from the background -----
   // The page hands each viewer to the app's engine; the engine's offers/answers travel over the
   // normal signalling as {ch: "screen"} messages, on a connection separate from the call.
@@ -998,6 +1048,7 @@
     let ev;
     try { ev = typeof json === "string" ? JSON.parse(json) : json; } catch { return; }
     if (!ev) return;
+    if (String(ev.type).startsWith("update")) return onUpdateEvent(ev);
     if (ev.type === "started" || ev.type === "denied") {
       const w = nativeWait;
       nativeWait = null;
