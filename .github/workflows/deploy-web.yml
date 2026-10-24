@@ -29,6 +29,8 @@ jobs:
         env:
           SERVER_URL: ${{ vars.SERVER_URL }}
         run: |
+          # Default: this project's server on Cloudflare. A SERVER_URL repository variable overrides it.
+          SERVER_URL="${SERVER_URL:-https://boxxie-share-server.ricky-kundi.workers.dev}"
           if [ -z "$SERVER_URL" ]; then
             echo "::warning::SERVER_URL repository variable is not set yet. The site will load but can't open rooms. See README step 3."
           fi
