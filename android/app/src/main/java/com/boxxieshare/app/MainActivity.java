@@ -636,6 +636,33 @@ public class MainActivity extends Activity {
             return updater.info();
         }
 
+        /** How this TV is connected: a VPN usually stops friends reaching the TV directly. */
+        @JavascriptInterface
+        public String networkInfo() {
+            org.json.JSONObject o = new org.json.JSONObject();
+            try {
+                android.net.ConnectivityManager cm = (android.net.ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+                boolean vpn = false, wifi = false, ethernet = false;
+                if (cm != null && Build.VERSION.SDK_INT >= 23) {
+                    android.net.Network n = cm.getActiveNetwork();
+                    android.net.NetworkCapabilities c = n == null ? null : cm.getNetworkCapabilities(n);
+                    if (c != null) {
+                        vpn = c.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN);
+                        wifi = c.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI);
+                        ethernet = c.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET);
+                    }
+                    if (!vpn) for (android.net.Network x : cm.getAllNetworks()) {
+                        android.net.NetworkCapabilities cx = cm.getNetworkCapabilities(x);
+                        if (cx != null && cx.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN)) vpn = true;
+                    }
+                }
+                o.put("vpn", vpn);
+                o.put("wifi", wifi);
+                o.put("ethernet", ethernet);
+            } catch (Exception ignored) {}
+            return o.toString();
+        }
+
         /** Is the TV screen still being shared? (After the page reloads, it rejoins the room.) */
         @JavascriptInterface
         public boolean isSharing() {

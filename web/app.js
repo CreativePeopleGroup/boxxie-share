@@ -1032,6 +1032,14 @@
     try { NATIVE.installUpdate(); } catch { updating = false; }
   };
 
+  // ----- TV app: warn when a VPN is on (it usually stops friends reaching the TV) -----
+  function checkVpn() {
+    let vpn = false;
+    try { vpn = typeof NATIVE.networkInfo === "function" && !!JSON.parse(NATIVE.networkInfo()).vpn; } catch {}
+    $("vpn-note").hidden = !(vpn && S.nativeSharing); // only the sharing TV ever runs this
+  }
+  setInterval(() => S.nativeSharing && checkVpn(), 15000);
+
   // ----- TV app: how each friend's picture is doing (shown under "Friends join here") -----
   const health = new Map();
   function onViewerHealth(ev) {
@@ -1202,6 +1210,7 @@
     try { NATIVE.setIceServers(JSON.stringify(S.ice || [])); } catch {}
     syncFilmToAll();
     if (S.endingWhy) autoEnd(null);
+    checkVpn();
   }
   function nativeStopped() {
     S.nativeSharing = false;

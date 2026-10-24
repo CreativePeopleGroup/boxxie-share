@@ -57,6 +57,7 @@ with sync_playwright() as p:
     check(wait(lambda: "Sarah" in tv.inner_text("#viewer-health") and "getting the picture" in tv.inner_text("#viewer-health"), 10), "the TV shows that Sarah is getting the picture")
     check(friend.is_hidden("#screen-diag"), "Sarah sees no 'waiting' message once the picture arrives")
     tv.screenshot(path=f"{OUT}/native-2b-health.png")
+    check(tv.is_hidden("#vpn-note"), "no VPN warning when there's no VPN")
 
     # Open another app: Home
     tap(tv, "#ctl-reshare")
