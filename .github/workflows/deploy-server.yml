@@ -137,6 +137,14 @@ jobs:
           echo "$R" | jq -r '.result.key' | npx --yes wrangler@4 secret put TURN_KEY_API_TOKEN > /dev/null
           echo "::notice::Relay: switched on (Cloudflare TURN key created)"
 
+      - name: Check the relay
+        env:
+          URL: ${{ steps.deploy.outputs.deployment-url }}
+        run: |
+          sleep 5
+          R="$(curl -s "$URL/health/relay")"
+          echo "::notice::Relay check: $R"
+
       - name: Show the server address
         run: |
           echo "### Server deployed" >> "$GITHUB_STEP_SUMMARY"

@@ -170,14 +170,20 @@ async function openRelay(env) {
   ];
 }
 
-async function iceServers(env) {
+async function iceServers(env, report = {}) {
   const stun = [{ urls: ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"] }];
-  if (!env.TURN_KEY_ID || !env.TURN_KEY_API_TOKEN) {
+  const backup = async () => {
     try {
-      return [...stun, ...(await openRelay(env))];
+      const r = await openRelay(env);
+      report.backup = r.length > 0;
+      return [...stun, ...r];
     } catch {
       return stun;
     }
+  };
+  if (!env.TURN_KEY_ID || !env.TURN_KEY_API_TOKEN) {
+    report.cloudflare = "not set up";
+    return backup();
   }
   try {
     const res = await fetch(
@@ -191,14 +197,22 @@ async function iceServers(env) {
         body: JSON.stringify({ ttl: 12 * 60 * 60 }),
       }
     );
-    if (!res.ok) return stun;
+    if (!res.ok) {
+      report.cloudflare = `error ${res.status}`;
+      return backup();
+    }
     const data = await res.json();
     let servers = data.iceServers;
     if (servers && !Array.isArray(servers)) servers = [servers];
-    if (!Array.isArray(servers) || servers.length === 0) return stun;
+    if (!Array.isArray(servers) || servers.length === 0) {
+      report.cloudflare = "no servers returned";
+      return backup();
+    }
+    report.cloudflare = "ok";
     return [...stun, ...servers];
-  } catch {
-    return stun;
+  } catch (e) {
+    report.cloudflare = "unreachable";
+    return backup();
   }
 }
 
@@ -224,6 +238,13 @@ export default {
 
     if (url.pathname === "/" || url.pathname === "/health") {
       return json({ ok: true, service: "boxxie-share" }, 200, request, env);
+    }
+    // Is the relay working? Addresses only, never the logins.
+    if (url.pathname === "/health/relay") {
+      const report = {};
+      const servers = await iceServers(env, report);
+      const urls = servers.flatMap((x) => (Array.isArray(x.urls) ? x.urls : [x.urls])).filter(Boolean);
+      return json({ ...report, relays: urls.filter((u) => /^turns?:/.test(u)) }, 200, request, env);
     }
 
     const isSocket = (request.headers.get("Upgrade") || "").toLowerCase() === "websocket";
