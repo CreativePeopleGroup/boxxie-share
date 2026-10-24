@@ -511,6 +511,9 @@ export class Room extends DurableObject {
     for (const v of this._approved()) {
       this._send(v.ws, { type: "peers", you: v.a.id, peers: everyone.filter((p) => p.id !== v.a.id) });
     }
+    // The host's paired phone sees who's waiting, so it can let them in.
+    const pending = this._pending().map((s) => ({ id: s.a.id, name: s.a.name, photo: s.a.photo || null }));
+    for (const ph of this._approved().filter((x) => x.a.companionOf === "host")) this._send(ph.ws, { type: "requests", pending });
   }
 
   async fetch(request) {
@@ -599,6 +602,7 @@ export class Room extends DurableObject {
     }
     const host = this._host();
     if (host) this._send(host.ws, { type: "join-request", id, name, photo: who && who.photo });
+    for (const ph of this._approved().filter((x) => x.a.companionOf === "host")) this._send(ph.ws, { type: "join-request", id, name, photo: who && who.photo });
     await this._pushRoster(meta);
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -629,7 +633,9 @@ export class Room extends DurableObject {
     }
 
     // ----- host-only actions -----
-    if (a.role === "host") {
+    // The host's own paired phone may also let people in (the TV may be busy showing another app).
+    const hostPhone = a.role === "viewer" && a.state === "approved" && a.companionOf === "host" && (msg.type === "approve" || msg.type === "deny");
+    if (a.role === "host" || hostPhone) {
       switch (msg.type) {
         case "approve": {
           const t = this._byId(msg.id);

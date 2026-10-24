@@ -120,7 +120,14 @@
   const canHost = !!(testVideo.captureStream || testVideo.mozCaptureStream) && "RTCPeerConnection" in window;
   const canCall = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
   // Screen sharing works in desktop browsers (Chrome, Edge, Firefox, Safari on Mac).
-  const canShareScreen = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) && "RTCPeerConnection" in window;
+  const canShareScreenWeb = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) && "RTCPeerConnection" in window;
+  // The Android app (phones, Android TV, Fire TV) can share the whole device screen from the
+  // background with its own video engine. It talks to this page through window.BoxxieNative.
+  const NATIVE = window.BoxxieNative && typeof window.BoxxieNative.screenShareInfo === "function" ? window.BoxxieNative : null;
+  let nativeInfo = {};
+  try { nativeInfo = NATIVE ? JSON.parse(NATIVE.screenShareInfo()) || {} : {}; } catch {}
+  const canNativeShare = !!nativeInfo.available;
+  const canShareScreen = canShareScreenWeb || canNativeShare;
 
   // ---------------- home ----------------
   // ---------------- accounts ----------------
@@ -662,6 +669,28 @@
     $("source-field").hidden = !(canHost && canShareScreen);
     $("host-form").classList.toggle("file-only", canHost && !canShareScreen);
   })();
+  // Screen sharing: whole screen, one window, or one browser tab (the browser's picker opens on that choice)
+  S.surface = store.get("surface") || "monitor";
+  const SURFACE_NOTES = {
+    monitor: "Everything on your screen, from any app. Tick <strong>Share system audio</strong> for sound.",
+    window: "Just one app's window, such as a media player. Other windows stay private.",
+    browser: "One browser tab, such as a video site. Tick <strong>Share tab audio</strong> for sound: it's the most reliable way to share sound.",
+  };
+  function setSurface(v) {
+    S.surface = v;
+    store.set("surface", v);
+    document.querySelectorAll("[data-surface]").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.surface === v)));
+    $("surface-note").innerHTML = SURFACE_NOTES[v];
+  }
+  document.querySelectorAll("[data-surface]").forEach((b) => (b.onclick = () => setSurface(b.dataset.surface)));
+  setSurface(S.surface);
+  if (canNativeShare && !canShareScreenWeb) {
+    // Android app: always the whole device, from any app, while Boxxie Share runs in the background.
+    $("surface-choice").hidden = true;
+    $("surface-label").hidden = true;
+    $("surface-note").innerHTML = `Shares everything on this ${isTV ? "TV" : "device"}, from any app. Start sharing, then press <strong>Home</strong> and open what you like. ${nativeInfo.audio ? "Sound is shared too." : "This device can only share the picture, not the sound."} Netflix, Prime and other paid apps show black.`;
+    document.querySelector('[data-source="screen"]').lastChild.textContent = isTV ? "TV screen" : "Phone screen";
+  }
   function setSource(src) {
     S.source = src;
     document.querySelectorAll("[data-source]").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.source === src)));
@@ -729,7 +758,11 @@
 
     $("host-start").disabled = true;
     try {
-      if (S.source === "screen") {
+      if (S.source === "screen" && !canShareScreenWeb && canNativeShare) {
+        const ok = await nativeStart();
+        if (!ok) return showError(err, "Screen sharing wasn't allowed. Press Start sharing and choose Start now (or Allow) when asked.");
+        useNativeScreen();
+      } else if (S.source === "screen") {
         // Must be asked for straight away, while the button press still counts.
         const stream = await pickScreen();
         if (!stream) return showError(err, "Screen sharing was cancelled. Press Start sharing to choose what to share.");
@@ -848,11 +881,12 @@
   async function pickScreen() {
     try {
       return await navigator.mediaDevices.getDisplayMedia({
-        video: { width: { ideal: quality().width }, height: { ideal: quality().height }, frameRate: { ideal: 30, max: 30 } },
+        video: { width: { ideal: quality().width }, height: { ideal: quality().height }, frameRate: { ideal: 30, max: 30 }, displaySurface: S.surface || "monitor" },
         audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
         systemAudio: "include",
         surfaceSwitching: "include",
         selfBrowserSurface: "exclude",
+        monitorTypeSurfaces: "include",
       });
     } catch {
       return null;
@@ -889,10 +923,134 @@
     $("ctl-reshare").focus();
   }
   $("ctl-reshare").onclick = async () => {
+    if (S.native) {
+      if (S.nativeSharing) return NATIVE.goHome();
+      const ok = await nativeStart();
+      if (ok) {
+        useNativeScreen();
+        for (const id of S.peers.keys()) if (!S.companionOf.has(id)) NATIVE.addViewer(id);
+      }
+      return;
+    }
     const stream = await pickScreen();
     if (stream) useScreen(stream);
   };
-  $("ctl-stopshare").onclick = () => stoppedSharing();
+  $("ctl-stopshare").onclick = () => {
+    if (S.native) {
+      try { NATIVE.stopScreenShare(); } catch {}
+      return nativeStopped();
+    }
+    stoppedSharing();
+  };
+
+  // ----- Android app: whole-screen sharing from the background -----
+  // The page hands each viewer to the app's engine; the engine's offers/answers travel over the
+  // normal signalling as {ch: "screen"} messages, on a connection separate from the call.
+  let nativeWait = null;
+  function nativeStart() {
+    return new Promise((resolve) => {
+      nativeWait = resolve;
+      try {
+        NATIVE.startScreenShare(JSON.stringify({ iceServers: S.ice || [], quality: quality() }));
+      } catch {
+        nativeWait = null;
+        resolve(false);
+      }
+    });
+  }
+  window.boxxieNativeEvent = (json) => {
+    let ev;
+    try { ev = typeof json === "string" ? JSON.parse(json) : json; } catch { return; }
+    if (!ev) return;
+    if (ev.type === "started" || ev.type === "denied") {
+      const w = nativeWait;
+      nativeWait = null;
+      if (ev.type === "started") S.nativeAudio = !!ev.audio;
+      if (w) w(ev.type === "started");
+    } else if (ev.type === "stopped") {
+      if (S.nativeSharing) nativeStopped();
+    } else if (ev.type === "signal" && ev.peer) {
+      send({ type: "signal", to: ev.peer, data: { ...(ev.data || {}), ch: "screen" } });
+    } else if (ev.type === "error") {
+      toast(ev.message || "Screen sharing hit a problem.", 6000);
+    }
+  };
+  function useNativeScreen() {
+    S.native = true;
+    S.nativeSharing = true;
+    S.filmStream = new MediaStream(); // the picture goes through the app's own engine
+    S.filmStream._screen = true;
+    filmVideo.removeAttribute("src");
+    filmVideo.srcObject = null;
+    $("stage-empty").hidden = false;
+    $("stage-empty-text").textContent = `Friends can see your ${isTV ? "TV" : "screen"}. Press Home and open any app; Boxxie Share keeps sharing in the background.`;
+    $("screen-status").textContent = S.nativeAudio ? "Sharing this screen and its sound" : "Sharing this screen (picture only)";
+    setLabel($("ctl-reshare"), "Open another app");
+    try { NATIVE.setIceServers(JSON.stringify(S.ice || [])); } catch {}
+    syncFilmToAll();
+  }
+  function nativeStopped() {
+    S.nativeSharing = false;
+    $("stage-empty").hidden = false;
+    $("stage-empty-text").textContent = "You've stopped sharing. Friends are still in the room.";
+    $("screen-status").textContent = "Not sharing";
+    setLabel($("ctl-reshare"), "Share the screen again");
+  }
+
+  // Viewer: the app's screen arrives on its own connection
+  const screenPeers = new Map();
+  function closeScreenPeer(from) {
+    const sp = screenPeers.get(from);
+    if (!sp) return;
+    try { sp.pc.close(); } catch {}
+    screenPeers.delete(from);
+    // Closing doesn't fire "ended" on the tracks, so tidy the picture up here.
+    const view = S.filmView;
+    if (view && S.role === "viewer") {
+      for (const t of [...view.getTracks()]) if (t.readyState === "ended") view.removeTrack(t);
+      if (!view.getVideoTracks().length) {
+        $("stage-empty").hidden = false;
+        $("stage-empty-text").textContent = "The host has paused sharing. Stay here and it'll come back.";
+      }
+    }
+  }
+  function screenSignal(from, data) {
+    let sp = screenPeers.get(from);
+    // A new sharing session (the host restarted sharing or the app reconnected) starts afresh.
+    if (sp && data.session && sp.session !== data.session) {
+      closeScreenPeer(from);
+      sp = null;
+    }
+    if (!sp) {
+      const pc = new RTCPeerConnection({ iceServers: S.ice, bundlePolicy: "max-bundle" });
+      sp = { pc, session: data.session, pending: [] };
+      pc.onicecandidate = (e) => {
+        if (e.candidate) send({ type: "signal", to: from, data: { ch: "screen", session: sp.session, candidate: e.candidate.toJSON() } });
+      };
+      pc.ontrack = (e) => attachFilm(e.streams[0] || new MediaStream([e.track]), e.track);
+      screenPeers.set(from, sp);
+    }
+    const pc = sp.pc;
+    (async () => {
+      try {
+        if (data.sdp) {
+          await pc.setRemoteDescription(data.sdp);
+          if (data.sdp.type === "offer") {
+            await pc.setLocalDescription(await pc.createAnswer());
+            send({ type: "signal", to: from, data: { ch: "screen", session: sp.session, sdp: { type: pc.localDescription.type, sdp: pc.localDescription.sdp } } });
+          }
+          for (const c of sp.pending.splice(0)) await pc.addIceCandidate(c).catch(() => {});
+        } else if (data.candidate) {
+          if (pc.remoteDescription) await pc.addIceCandidate(data.candidate).catch(() => {});
+          else sp.pending.push(data.candidate);
+        } else if (data.bye) {
+          closeScreenPeer(from);
+        }
+      } catch (e) {
+        console.warn("screen", e);
+      }
+    })();
+  }
 
   // ---------------- join ----------------
   // Room codes are 8 characters. A pairing code from a TV is the room code + 6 digits.
@@ -1022,6 +1180,7 @@
         return;
       case "welcome": // host
         S.ice = m.iceServers || [];
+        if (S.native) try { NATIVE.setIceServers(JSON.stringify(S.ice)); } catch {}
         banner("");
         return;
       case "waiting": // viewer
@@ -1030,6 +1189,7 @@
         return;
       case "approved":
         S.ice = m.iceServers || [];
+        if (S.native) try { NATIVE.setIceServers(JSON.stringify(S.ice)); } catch {}
         if (m.companion) {
           S.companion = true;
           S.myName = m.ownerName || "Guest";
@@ -1075,9 +1235,14 @@
         if (m.companionOf) S.companionOf.set(m.id, m.companionOf);
         else S.companionOf.delete(m.id);
         resetPeer(m.id);
+        if (S.nativeSharing && !m.companionOf) try { NATIVE.addViewer(m.id); } catch {}
         return;
       case "viewer-left":
         closePeer(m.id);
+        if (S.native) try { NATIVE.removeViewer(m.id); } catch {}
+        return;
+      case "requests": // the host's paired phone: who's waiting to be let in
+        renderRequests(m.pending);
         return;
       case "signal":
         onSignal(m.from, m.data);
@@ -1296,10 +1461,20 @@
     lockBtn.title = S.locked ? "Let new people ask to join again" : "Stop anyone else asking to join";
     lockBtn.setAttribute("aria-pressed", String(S.locked));
 
+    renderRequests(m.pending);
+
+    m.viewers.forEach((v) => {
+      S.names.set(v.id, v.name);
+      if (v.companionOf) S.companionOf.set(v.id, v.companionOf);
+    });
+    renderPeople(m.viewers, true, m.maxViewers);
+    setPhonePaired(m.viewers.some((v) => v.companionOf === "host"));
+  }
+  function renderRequests(pending) {
     const list = $("request-list");
     const hadFocus = list.contains(document.activeElement);
     list.replaceChildren();
-    m.pending.forEach((p) => {
+    pending.forEach((p) => {
       S.names.set(p.id, p.name);
       const li = document.createElement("li");
       const n = document.createElement("span");
@@ -1318,15 +1493,8 @@
       li.append(n, yes, no);
       list.append(li);
     });
-    $("requests").hidden = m.pending.length === 0;
-    if (hadFocus) (list.querySelector(".allow") || (S.source === "screen" ? $("ctl-reshare") : $("ctl-play"))).focus();
-
-    m.viewers.forEach((v) => {
-      S.names.set(v.id, v.name);
-      if (v.companionOf) S.companionOf.set(v.id, v.companionOf);
-    });
-    renderPeople(m.viewers, true, m.maxViewers);
-    setPhonePaired(m.viewers.some((v) => v.companionOf === "host"));
+    $("requests").hidden = pending.length === 0;
+    if (hadFocus && S.role === "host") (list.querySelector(".allow") || (S.source === "screen" ? $("ctl-reshare") : $("ctl-play"))).focus();
   }
 
   const AV_COLOURS = ["#efcb99", "#ca99a6", "#e97684", "#489fa0", "#b0bfd1", "#5f83a1"];
@@ -1638,6 +1806,12 @@
   }
   function onSignal(from, data) {
     if (!data || typeof data !== "object") return;
+    if (data.ch === "screen") {
+      if (S.role === "host") {
+        if (NATIVE && S.native) try { NATIVE.signal(from, JSON.stringify(data)); } catch {}
+      } else screenSignal(from, data);
+      return;
+    }
     getPeer(from).onSignal(data);
   }
 
@@ -2091,6 +2265,13 @@
     S.closing = true;
     clearInterval(S.pingTimer);
     for (const id of [...S.peers.keys()]) closePeer(id);
+    for (const id of [...screenPeers.keys()]) closeScreenPeer(id);
+    if (S.native) {
+      try { NATIVE.stopScreenShare(); } catch {}
+      S.native = false;
+      S.nativeSharing = false;
+      setLabel($("ctl-reshare"), "Share something else");
+    }
     if (S.camStream) S.camStream.getTracks().forEach((t) => t.stop());
     S.camStream = null;
     S.inCall = false;

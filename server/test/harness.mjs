@@ -390,6 +390,23 @@ ok(codes.size > 1900 && [...codes].every((c) => !/[01OIL]/.test(c)), `codes are 
   const hostPhone = await connect(`/api/rooms/${rm.code}/ws?role=companion&pin=${hostPin}`, H2);
   const hap = await hostPhone.next(type("approved"));
   ok(hap.companion && hap.ownerName === "Ricky", "host can pair their own phone too");
+  const zed = await connect(`/api/rooms/${rm.code}/ws?role=viewer&name=Zed`, H2);
+  await zed.next(type("waiting"));
+  const zreq = await hostPhone.next(type("join-request"));
+  ok(zreq.name === "Zed", "the host's paired phone is told someone wants to join (the TV may be showing another app)");
+  const zlist = await hostPhone.next((m) => m.type === "requests" && m.pending.some((p) => p.name === "Zed"));
+  ok(!!zlist, "and sees the waiting list");
+  hostPhone.sendJ({ type: "deny", id: zreq.id });
+  ok((await zed.next(type("denied"))).reason === "denied", "the host's phone can answer join requests");
+  let sarahPhoneApproves = false;
+  const zed2 = await connect(`/api/rooms/${rm.code}/ws?role=viewer&name=Zed`, H2);
+  await zed2.next(type("waiting"));
+  const zreq2 = await h.next(type("join-request"));
+  phone.sendJ({ type: "approve", id: zreq2.id });
+  try { await zed2.next(type("approved"), 200); sarahPhoneApproves = true; } catch {}
+  ok(!sarahPhoneApproves, "a guest's paired phone can't let people in");
+  h.sendJ({ type: "deny", id: zreq2.id });
+
   hostPhone.sendJ({ type: "remote", action: "play" });
   ok((await h.next(type("remote"))).action === "play", "host's paired phone works as the film remote");
   phone.sendJ({ type: "remote", action: "faces:mini" });

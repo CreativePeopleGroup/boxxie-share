@@ -18,6 +18,8 @@ android {
         versionCode versionNum
         versionName versionLabel
         buildConfigField 'String', 'APP_URL', "\"${appUrl}\""
+        // Fire TV, Android TV boxes and phones are ARM. Leaving out x86 keeps the app small.
+        ndk { abiFilters 'armeabi-v7a', 'arm64-v8a' }
     }
 
     buildFeatures {
@@ -72,8 +74,19 @@ android {
         checkReleaseBuilds false
     }
 
+    packaging {
+        // Native libraries stay uncompressed and 16 KB aligned (needed for Android 15+ and Fire OS 16)
+        jniLibs { useLegacyPackaging false }
+    }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
     }
+}
+
+dependencies {
+    // Google's open-source WebRTC engine (prebuilt by the webrtc-sdk project): the video engine
+    // that sends the whole screen to friends while the app is in the background.
+    implementation 'io.github.webrtc-sdk:android:144.7559.15'
 }

@@ -98,7 +98,13 @@
             <input id="film-file" type="file" accept="video/*,.mkv,.mp4,.webm,.mov,.m4v" class="visually-hidden">
           </div>
           <div class="field" id="screen-field" hidden>
-            <p class="note">Next you'll pick a screen, window or tab. Tick <strong>Share audio</strong> for sound, then put on anything you like. Friends can join whenever they want.</p>
+            <span class="label" id="surface-label">Share</span>
+            <div class="segmented" role="radiogroup" aria-labelledby="surface-label" id="surface-choice">
+              <button type="button" role="radio" aria-checked="true" data-surface="monitor">Whole screen</button>
+              <button type="button" role="radio" aria-checked="false" data-surface="window">A window</button>
+              <button type="button" role="radio" aria-checked="false" data-surface="browser">A browser tab</button>
+            </div>
+            <p class="note" id="surface-note">Everything on your screen, from any app. Tick <strong>Share system audio</strong> for sound.</p>
           </div>
 
           <div class="opts-row">

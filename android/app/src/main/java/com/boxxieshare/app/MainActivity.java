@@ -22,6 +22,8 @@ import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
+import android.media.projection.MediaProjectionManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -53,6 +55,12 @@ public class MainActivity extends Activity {
     private static final int REQ_PICK_FILE = 10;
     private static final int REQ_MEDIA_PERMISSION = 20;
     private static final int REQ_CALL_PERMISSION = 30;
+    private static final int REQ_SCREEN = 40;
+    private static final int REQ_SHARE_AUDIO = 50;
+
+    /** True while the page showing is the Boxxie Share site (the JS bridge only answers it). */
+    private volatile boolean ourPage;
+    private ScreenShareEngine engine;
 
     private WebView web;
     private FrameLayout root;
@@ -102,6 +110,13 @@ public class MainActivity extends Activity {
 
         web.setWebViewClient(new ShellClient());
         web.setWebChromeClient(new ShellChrome());
+
+        // Whole-screen sharing for the page (phones, Android TV, Fire TV)
+        engine = ScreenShareEngine.get(this);
+        engine.setListener(json -> runOnUiThread(() -> {
+            if (web != null) web.evaluateJavascript("window.boxxieNativeEvent && window.boxxieNativeEvent(" + org.json.JSONObject.quote(json) + ")", null);
+        }));
+        web.addJavascriptInterface(new NativeBridge(), "BoxxieNative");
         web.setFocusable(true);
         web.setFocusableInTouchMode(true);
 
@@ -155,6 +170,12 @@ public class MainActivity extends Activity {
     // ------------------------------------------------------------------ navigation
 
     private class ShellClient extends WebViewClient {
+        @Override
+        public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
+            ourPage = url != null && isOurSite(Uri.parse(url));
+            super.onPageStarted(view, url, favicon);
+        }
+
         @Override
         public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
             return handleUrl(request.getUrl());
@@ -407,6 +428,14 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (requestCode == REQ_SCREEN) {
+            if (resultCode == RESULT_OK && data != null) {
+                ScreenShareService.start(this, data);
+            } else {
+                engine.emit(eventJson("denied"));
+            }
+            return;
+        }
         if (requestCode == REQ_PICK_FILE) {
             Uri u = (resultCode == RESULT_OK && data != null) ? data.getData() : null;
             finishFileChoice(u == null ? null : new Uri[]{u});
@@ -445,6 +474,10 @@ public class MainActivity extends Activity {
 
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+        if (requestCode == REQ_SHARE_AUDIO) {
+            askToCaptureScreen(); // with or without sound
+            return;
+        }
         if (requestCode == REQ_MEDIA_PERMISSION) {
             showVideoChooser(); // shows the list if allowed, otherwise just the system picker
             return;
@@ -495,6 +528,94 @@ public class MainActivity extends Activity {
         });
     }
 
+    // ------------------------------------------------------------------ screen sharing
+
+    private static org.json.JSONObject eventJson(String type) {
+        org.json.JSONObject o = new org.json.JSONObject();
+        try { o.put("type", type); } catch (Exception ignored) {}
+        return o;
+    }
+
+    /** Sound from other apps needs the microphone permission (Android's rule), then the system pop-up. */
+    private void beginScreenShare() {
+        if (Build.VERSION.SDK_INT >= 29 && !hasPermission(Manifest.permission.RECORD_AUDIO)) {
+            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQ_SHARE_AUDIO);
+        } else {
+            askToCaptureScreen();
+        }
+    }
+
+    private void askToCaptureScreen() {
+        MediaProjectionManager mpm = (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
+        if (mpm == null) {
+            engine.emit(eventJson("denied"));
+            return;
+        }
+        try {
+            startActivityForResult(mpm.createScreenCaptureIntent(), REQ_SCREEN);
+        } catch (ActivityNotFoundException e) {
+            Toast.makeText(this, "This device doesn't allow screen sharing", Toast.LENGTH_LONG).show();
+            engine.emit(eventJson("denied"));
+        }
+    }
+
+    /** What the page can call as window.BoxxieNative (only ever answered for the Boxxie Share site). */
+    private class NativeBridge {
+        @JavascriptInterface
+        public String screenShareInfo() {
+            org.json.JSONObject o = new org.json.JSONObject();
+            try {
+                o.put("available", ourPage && Build.VERSION.SDK_INT >= 21);
+                o.put("audio", Build.VERSION.SDK_INT >= 29);
+                o.put("sdk", Build.VERSION.SDK_INT);
+                o.put("tv", isTv());
+            } catch (Exception ignored) {}
+            return o.toString();
+        }
+
+        @JavascriptInterface
+        public void startScreenShare(String config) {
+            if (!ourPage) return;
+            engine.configure(config);
+            runOnUiThread(MainActivity.this::beginScreenShare);
+        }
+
+        @JavascriptInterface
+        public void setIceServers(String json) {
+            if (ourPage) engine.setIceServers(json);
+        }
+
+        @JavascriptInterface
+        public void addViewer(String id) {
+            if (ourPage) engine.addViewer(id);
+        }
+
+        @JavascriptInterface
+        public void signal(String id, String json) {
+            if (ourPage) engine.signal(id, json);
+        }
+
+        @JavascriptInterface
+        public void removeViewer(String id) {
+            if (ourPage) engine.removeViewer(id);
+        }
+
+        @JavascriptInterface
+        public void stopScreenShare() {
+            if (ourPage) engine.stop();
+        }
+
+        /** "Open another app": go to the home screen, sharing carries on. */
+        @JavascriptInterface
+        public void goHome() {
+            if (!ourPage) return;
+            runOnUiThread(() -> {
+                Intent home = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                try { startActivity(home); } catch (Exception e) { moveTaskToBack(true); }
+            });
+        }
+    }
+
     // ------------------------------------------------------------------ lifecycle
 
     @Override
@@ -518,6 +639,10 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        if (engine != null && isFinishing()) {
+            engine.setListener(null);
+            engine.stop();
+        }
         if (Build.VERSION.SDK_INT >= 33 && backCallback != null) {
             getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(backCallback);
         }
