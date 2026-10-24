@@ -135,7 +135,7 @@ jobs:
             echo "::warning::Relay not switched on: Cloudflare said $(echo "$R" | jq -c '.errors'). The Cloudflare token needs the 'Calls: Edit' (Realtime) permission."
             exit 0
           fi
-          KID="$(echo "$R" | jq -r '.result.uid // empty')"; KEY="$(echo "$R" | jq -r '.result.key // empty')"
+          KID="$(echo "$R" | jq -r '.result.uid // empty')"; KEY="$(echo "$R" | jq -r '.result.secret // .result.key // empty')"
           if [ -z "$KID" ] || [ -z "$KEY" ]; then echo "::warning::Relay: unexpected reply fields $(echo "$R" | jq -c '.result | keys')"; exit 0; fi
           # printf, not echo: no stray line break on the end of the key
           printf '%s' "$KID" | npx --yes wrangler@4 secret put TURN_KEY_ID > /dev/null
