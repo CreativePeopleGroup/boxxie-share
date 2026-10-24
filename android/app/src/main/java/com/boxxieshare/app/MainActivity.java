@@ -95,6 +95,7 @@ public class MainActivity extends Activity {
         }
 
         WebSettings s = web.getSettings();
+        s.setTextZoom(100); // the page sizes itself to the TV; ignore the system text-size setting
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
         s.setMediaPlaybackRequiresUserGesture(false);

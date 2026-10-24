@@ -724,3 +724,22 @@ textarea:focus { border-color: rgba(239, 203, 153, 0.6); outline: none; }
 .end-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; width: 100%; }
 .end-actions button { min-height: 48px; border-radius: 14px; flex: 1 1 200px; justify-content: center; }
 .end-actions button[hidden] { display: none; }
+
+/* ----- TV: scale the menus to the screen (rooms stay full screen and fit by themselves) ----- */
+.tv .screen:not(.room) { zoom: var(--tvz, 1); min-height: calc(100dvh / var(--tvz, 1)); box-sizing: border-box; }
+
+/* ----- How friends join, shown on the host's screen while the stage is empty (TV sharing) ----- */
+.stage-empty-in { display: flex; flex-direction: column; align-items: center; gap: 22px; max-width: 900px; }
+.stage-empty-in > p { margin: 0; }
+.join-card { display: flex; align-items: center; gap: 24px; text-align: left; padding: 20px 26px 20px 20px; border-radius: 26px; background: rgba(15, 23, 32, 0.82); box-shadow: var(--shadow); color: var(--text, #f6f1ea); }
+.join-card[hidden] { display: none; }
+.join-card .pair-qr svg { width: 168px; height: 168px; }
+.join-card h3 { margin: 0 0 6px; font-size: 1.35rem; }
+.join-card p { margin: 0; color: var(--muted); font-size: 0.95rem; line-height: 1.35; }
+.join-card .join-addr { color: var(--sand, #efcb99); font-weight: 700; font-size: 1.05rem; margin: 2px 0 4px; word-break: break-all; }
+.join-card .join-code { color: #fff; font-weight: 800; font-size: 2rem; letter-spacing: 0.12em; margin-top: 2px; font-variant-numeric: tabular-nums; }
+@media (max-height: 560px) { .join-card .pair-qr svg { width: 120px; height: 120px; } .join-card .join-code { font-size: 1.5rem; } }
+/* In the room the film stays full screen; the buttons, panels and messages scale with the TV */
+.tv .room :is(.overlay, .faces, .chat-toasts, .dock, .sheet, .requests, .stage-empty-in, .banner), .tv .toast { zoom: var(--tvz, 1); }
+.tv .room ~ .toast, .tv .toast { bottom: auto; top: 24px; left: 50%; right: auto; transform: translateX(-50%); }
+.tv .chat-toasts { bottom: auto; top: 96px; }

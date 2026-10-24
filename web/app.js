@@ -28,6 +28,29 @@
   const $ = (id) => document.getElementById(id);
   const isTV = matchMedia("(pointer: none)").matches || /\b(AFT[A-Z0-9]*|Android TV|BRAVIA|GoogleTV)\b/i.test(navigator.userAgent) || /BoxxieShareTV/.test(navigator.userAgent);
   if (isTV) document.documentElement.classList.add("tv");
+  // TVs report different page sizes (Fire TV is often 960×540). The TV screens are laid out
+  // for 1280×720 and scale down to fit exactly, so nothing ever needs scrolling.
+  const root = document.documentElement;
+  function shrinkToFit() {
+    // Still taller than the screen (long names, invitations, big system font)? Shrink a bit more.
+    const scr = [...document.querySelectorAll(".screen")].find((x) => !x.hidden);
+    if (!scr || scr.classList.contains("room")) return;
+    const h = root.scrollHeight;
+    if (h > innerHeight + 1) {
+      const z = Number(getComputedStyle(root).getPropertyValue("--tvz")) || 1;
+      root.style.setProperty("--tvz", String(Math.floor(z * (innerHeight / h) * 1000) / 1000));
+    }
+  }
+  function fitTV() {
+    if (!isTV) return;
+    root.style.setProperty("--tvz", String(Math.floor(Math.min(1, innerWidth / 1280, innerHeight / 720) * 1000) / 1000));
+    shrinkToFit();
+  }
+  if (isTV) {
+    fitTV();
+    addEventListener("resize", fitTV);
+    new ResizeObserver(() => requestAnimationFrame(shrinkToFit)).observe(document.body);
+  }
 
   // ---------------- tiny storage helpers (never required to work) ----------------
   const store = {
@@ -66,6 +89,7 @@
   // ---------------- screens ----------------
   function show(name) {
     document.querySelectorAll(".screen").forEach((s) => (s.hidden = s.dataset.screen !== name));
+    fitTV();
     const target = document.querySelector(`[data-screen="${name}"]`);
     const first = target && (target.querySelector("[data-autofocus]") || target.querySelector("button:not([hidden]), input:not([type=hidden]):not(.visually-hidden)"));
     if (first && (isTV || name !== "room")) setTimeout(() => first.focus(), 30);
@@ -1317,6 +1341,7 @@
     $("requests").hidden = true;
     $("chat-log").replaceChildren();
     $("cams").replaceChildren();
+    renderJoinCard();
     if (host) {
       renderCode(S.code);
       $("stage-empty").hidden = !!(filmVideo.src || filmVideo.srcObject);
@@ -1378,6 +1403,18 @@
   function joinLink() {
     return `${location.origin}${location.pathname}#join=${formatCode(S.code)}`;
   }
+  // The website address without https:// or a trailing slash, for reading off a TV
+  const siteAddress = () => (location.host + location.pathname).replace(/\/(index\.html)?$/, "");
+  function renderJoinCard() {
+    const show = S.role === "host" && !!S.code;
+    $("join-card").hidden = !show;
+    if (!show) return;
+    $("join-addr").textContent = siteAddress();
+    $("join-code-big").textContent = formatCode(S.code);
+    const box = $("join-qr");
+    box.replaceChildren();
+    try { box.append(window.BoxxieQR.svg(joinLink(), { size: 200, dark: "#142130", light: "#ffffff" })); } catch {}
+  }
 
   // ----- Share invite: WhatsApp, Messages (iMessage on iPhone), Email, copy, phone share menu, QR -----
   const isApple = /iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent) && "ontouchend" in document || /iPhone|iPad|iPod/.test(navigator.userAgent);
@@ -1399,6 +1436,8 @@
     const box = $("share-qr");
     box.replaceChildren();
     try { box.append(window.BoxxieQR.svg(joinLink(), { size: 200 })); } catch {}
+    $("share-addr").textContent = siteAddress();
+    $("share-code").textContent = formatCode(S.code);
     $("invite-panel").hidden = true;
     $("share-panel").hidden = false;
     $("share-link-label").textContent = "Copy link";

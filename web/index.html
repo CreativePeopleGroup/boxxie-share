@@ -347,7 +347,19 @@
     <div class="stage-col">
       <div class="stage" id="stage">
         <video id="film" playsinline></video>
-        <div class="stage-empty" id="stage-empty"><p id="stage-empty-text">Connecting to the film…</p></div>
+        <div class="stage-empty" id="stage-empty"><div class="stage-empty-in">
+          <p id="stage-empty-text">Connecting to the film…</p>
+          <div class="join-card" id="join-card" hidden>
+            <div class="pair-qr" id="join-qr" aria-hidden="true"></div>
+            <div class="join-card-text">
+              <h3>Friends join here</h3>
+              <p>Scan with a phone camera, or go to</p>
+              <p class="join-addr" id="join-addr"></p>
+              <p>and type the code</p>
+              <p class="join-code" id="join-code-big"></p>
+            </div>
+          </div>
+        </div></div>
         <button class="sound-on" id="sound-on" hidden>Turn sound on</button>
         <div class="banner" id="banner" role="status" hidden></div>
 
@@ -474,7 +486,8 @@
       </div>
       <div class="share-qr-row">
         <div class="pair-qr" id="share-qr" aria-hidden="true"></div>
-        <p class="note">Friends can scan this with their phone's camera to join. They'll sign in, then you let them in.</p>
+        <div><p class="note">Friends can scan this with their phone's camera to join. They'll sign in, then you let them in.</p>
+        <p class="note">Or go to <b id="share-addr"></b> and type <b id="share-code"></b></p></div>
       </div>
     </div>
 
