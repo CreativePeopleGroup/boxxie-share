@@ -156,13 +156,14 @@ From now on, any change you push to `web/`, `server/` or `android/` redeploys au
 2. Go to **Settings → My Fire TV → Developer options → Install unknown apps** and turn on
    **Downloader**. If you can't see *Developer options*, go to **Settings → My Fire TV →
    About** and click the device name 7 times.
-3. Open Downloader and type your APK link from Step 6. Install it, then open
-   **Boxxie Share** from your apps.
+3. Open Downloader, type the code **1920999** and press **Go**. Install it, then open
+   **Boxxie Share** from your apps. (The code is an AFTVnews short link to the always-latest
+   APK, `…/releases/latest/download/BoxxieShare.apk`, so it keeps working after updates.)
 
 ### Android TV / Google TV
 
 Same as Fire TV: install **Downloader** from the Play Store, allow it to install unknown
-apps (**Settings → Apps → Security & restrictions → Unknown sources**), then use the APK link.
+apps (**Settings → Apps → Security & restrictions → Unknown sources**), then type **1920999**.
 
 ### Android phone or tablet
 

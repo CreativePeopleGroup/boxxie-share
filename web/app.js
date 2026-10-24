@@ -26,7 +26,7 @@
   };
 
   const $ = (id) => document.getElementById(id);
-  const isTV = matchMedia("(pointer: none)").matches || /\b(AFT|Android TV|BRAVIA|GoogleTV|AFTS|AFTM|AFTK)\b/i.test(navigator.userAgent) || /BoxxieShareTV/.test(navigator.userAgent);
+  const isTV = matchMedia("(pointer: none)").matches || /\b(AFT[A-Z0-9]*|Android TV|BRAVIA|GoogleTV)\b/i.test(navigator.userAgent) || /BoxxieShareTV/.test(navigator.userAgent);
   if (isTV) document.documentElement.classList.add("tv");
 
   // ---------------- tiny storage helpers (never required to work) ----------------
@@ -711,16 +711,27 @@
   setQuality("hd");
 
   // Install hint for phones
+  const DOWNLOADER_CODE = "1920999"; // AFTVnews short code for the latest BoxxieShare.apk
   (function installHint() {
     const standalone = matchMedia("(display-mode: standalone)").matches || navigator.standalone;
-    if (standalone || isTV) return;
-    const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
     const hint = $("install-hint");
+    if (inApp) return;
+    if (isTV) {
+      // A TV browser: point to the real app
+      hint.innerHTML = `Get the Boxxie Share app for this TV: open <strong>Downloader</strong> and type <strong>${DOWNLOADER_CODE}</strong>.`;
+      hint.hidden = false;
+      return;
+    }
+    if (standalone) return;
+    const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
     if (ios) {
       hint.textContent = "To keep Boxxie Share on your home screen, tap Share in Safari, then Add to Home Screen.";
       hint.hidden = false;
     } else if (/Android/.test(navigator.userAgent)) {
       hint.textContent = "To keep Boxxie Share on your home screen, open the browser menu and choose Install app or Add to Home screen.";
+      hint.hidden = false;
+    } else {
+      hint.innerHTML = `Watching on a Fire TV or Android TV? Get the app: open <strong>Downloader</strong> on the TV and type <strong>${DOWNLOADER_CODE}</strong>.`;
       hint.hidden = false;
     }
   })();
