@@ -419,6 +419,11 @@ export class Room extends DurableObject {
       return false;
     }
     t.ws.serializeAttachment({ ...t.a, state: "approved" });
+    // Remember who's been let in, so a phone that locks or loses signal can come straight back.
+    if (t.a.userId && !t.a.companionOf) {
+      meta.welcomeBack = { ...(meta.welcomeBack || {}), [t.a.userId]: Date.now() };
+      await this.ctx.storage.put("meta", meta);
+    }
     this._send(t.ws, { type: "approved", iceServers: await iceServers(this.env) });
     if (meta.endAt) this._send(t.ws, this._endingMsg(meta));
     const host = this._host();
@@ -589,6 +594,22 @@ export class Room extends DurableObject {
     const id = randomId();
     const name = cleanName(who ? who.name : url.searchParams.get("name"));
 
+    // Someone the host already let in, coming back (phone locked, signal dropped): straight back in,
+    // even if the room is locked now. Their old, dead connection is replaced.
+    if (who && meta.welcomeBack && meta.welcomeBack[who.id]) {
+      for (const old of this._approved().filter((x) => x.a.userId === who.id && !x.a.companionOf)) {
+        old.ws.serializeAttachment({ ...old.a, role: "gone" });
+        try { old.ws.close(4000, "replaced"); } catch {}
+        const h = this._host();
+        if (h) this._send(h.ws, { type: "viewer-left", id: old.a.id });
+      }
+      server.serializeAttachment({ id, role: "viewer", name, state: "pending", userId: who.id, photo: who.photo });
+      this._send(server, { type: "waiting", id, hostName: meta.hostName });
+      const me = this._byId(id);
+      if (me) await this._approve(meta, me);
+      return new Response(null, { status: 101, webSocket: client });
+    }
+
     if (meta.locked) {
       this._send(server, { type: "denied", reason: "locked" });
       server.close(4003, "locked");
@@ -656,6 +677,10 @@ export class Room extends DurableObject {
           const t = this._byId(msg.id);
           if (!t || t.a.role !== "viewer") return;
           this._send(t.ws, { type: "denied", reason: msg.type === "kick" ? "removed" : "denied" });
+          if (t.a.userId && meta.welcomeBack && meta.welcomeBack[t.a.userId]) {
+            delete meta.welcomeBack[t.a.userId]; // removed means removed: they'd have to ask again
+            await this.ctx.storage.put("meta", meta);
+          }
           t.ws.serializeAttachment({ ...t.a, role: "gone" });
           try {
             t.ws.close(4003, msg.type);

@@ -1032,6 +1032,53 @@
     try { NATIVE.installUpdate(); } catch { updating = false; }
   };
 
+  // ----- TV app: how each friend's picture is doing (shown under "Friends join here") -----
+  const health = new Map();
+  function onViewerHealth(ev) {
+    if (!ev.peer) return;
+    const h = health.get(ev.peer) || { frames: 0, last: 0 };
+    if (ev.ice) h.ice = ev.ice;
+    if (ev.type === "viewer-stats") {
+      h.growing = ev.frames > h.frames;
+      h.frames = ev.frames;
+      h.bytes = ev.bytes;
+      h.codec = ev.codec || h.codec;
+      h.encoder = ev.encoder || h.encoder;
+      h.vp8 = ev.vp8;
+    }
+    health.set(ev.peer, h);
+    renderHealth();
+  }
+  function renderHealth() {
+    const list = $("viewer-health");
+    for (const id of [...health.keys()]) if (!S.peers.has(id) && !S.names.has(id)) health.delete(id);
+    list.replaceChildren();
+    for (const [id, h] of health) {
+      if (S.companionOf.has(id)) continue;
+      const li = document.createElement("li");
+      const who = document.createElement("b");
+      who.textContent = S.names.get(id) || "Friend";
+      const st = document.createElement("span");
+      const ice = h.ice || "new";
+      let text;
+      if (ice === "failed" || ice === "disconnected") {
+        text = "can't connect (network)";
+        li.className = "bad";
+      } else if ((ice === "connected" || ice === "completed") && h.frames > 0) {
+        text = `getting the picture · ${h.codec || "video"}${h.encoder ? ` (${h.encoder})` : ""}`;
+        li.className = "ok";
+      } else if (ice === "connected" || ice === "completed") {
+        text = h.vp8 ? "connected, trying another video format…" : "connected, starting the picture…";
+      } else {
+        text = "connecting…";
+      }
+      st.textContent = text;
+      li.append(who, st);
+      list.append(li);
+    }
+    list.hidden = !list.children.length;
+  }
+
   // ----- TV app: choose one of the TV's apps to open while sharing -----
   let appsCache = null;
   function openApps() {
@@ -1127,6 +1174,7 @@
     try { ev = typeof json === "string" ? JSON.parse(json) : json; } catch { return; }
     if (!ev) return;
     if (String(ev.type).startsWith("update")) return onUpdateEvent(ev);
+    if (ev.type === "viewer-state" || ev.type === "viewer-stats") return onViewerHealth(ev);
     if (ev.type === "started" || ev.type === "denied") {
       const w = nativeWait;
       nativeWait = null;
@@ -1166,9 +1214,38 @@
 
   // Viewer: the app's screen arrives on its own connection
   const screenPeers = new Map();
+  async function screenDiag(sp) {
+    if (screenPeers.get(sp.from) !== sp) return;
+    let frames = 0, bytes = 0;
+    try {
+      (await sp.pc.getStats()).forEach((r) => {
+        if (r.type === "inbound-rtp" && r.kind === "video") {
+          frames += r.framesDecoded || 0;
+          bytes += r.bytesReceived || 0;
+        }
+      });
+    } catch {}
+    const el = $("screen-diag");
+    if (frames > 0) {
+      el.hidden = true;
+      return;
+    }
+    const ice = sp.pc.iceConnectionState;
+    let msg;
+    if (ice === "failed") msg = "Can't reach the TV's picture. Try the same Wi-Fi as the TV, or ask the host to press Stop sharing and share again.";
+    else if (ice === "connected" || ice === "completed") msg = bytes > 0 ? "The picture is arriving…" : "Connected to the TV. Waiting for its picture…";
+    else msg = "Connecting to the TV's picture…";
+    el.replaceChildren(document.createTextNode(msg));
+    const small = document.createElement("small");
+    small.textContent = `Network: ${ice} · received ${Math.round(bytes / 1024)} KB`;
+    el.append(small);
+    el.hidden = false;
+  }
   function closeScreenPeer(from) {
     const sp = screenPeers.get(from);
     if (!sp) return;
+    clearInterval(sp.timer);
+    $("screen-diag").hidden = true;
     try { sp.pc.close(); } catch {}
     screenPeers.delete(from);
     // Closing doesn't fire "ended" on the tracks, so tidy the picture up here.
@@ -1190,7 +1267,8 @@
     }
     if (!sp) {
       const pc = new RTCPeerConnection({ iceServers: S.ice, bundlePolicy: "max-bundle" });
-      sp = { pc, session: data.session, pending: [] };
+      sp = { pc, session: data.session, pending: [], from };
+      sp.timer = setInterval(() => screenDiag(sp), 2000);
       pc.onicecandidate = (e) => {
         if (e.candidate) send({ type: "signal", to: from, data: { ch: "screen", session: sp.session, candidate: e.candidate.toJSON() } });
       };
@@ -1306,6 +1384,7 @@
       S.pingTimer = setInterval(() => send({ type: "ping" }), 25000);
     };
     ws.onmessage = (ev) => {
+      S.lastHeard = Date.now();
       let m;
       try { m = JSON.parse(ev.data); } catch { return; }
       onServer(m);
@@ -1313,7 +1392,10 @@
     ws.onclose = (ev) => {
       clearInterval(S.pingTimer);
       if (S.ws !== ws || S.closing) return;
-      if (S.refused || !opened) return failConnect(S.refused || "network");
+      if (S.refused) return failConnect(S.refused);
+      // Friends and paired phones: a locked screen or a signal drop isn't goodbye. Keep coming back.
+      if (S.role === "viewer" && (opened || S.rejoinSince) && ev.code !== 4004 && ev.code !== 4003) return rejoinSoon();
+      if (!opened) return failConnect("network");
       if (S.role === "host" && ev.code !== 4004 && ev.code !== 4000 && S.reconnectTries < 8) {
         S.reconnectTries++;
         banner("Connection dropped. Reconnecting…");
@@ -1325,6 +1407,38 @@
       if (S.role === "viewer") endWithMessage("Disconnected", "Your connection to the room dropped. Ask the host for the code and join again.");
     };
   }
+
+  // ----- Coming back after the phone locks or loses signal -----
+  // The server lets people the host already let in straight back in, so this is seamless.
+  function rejoinSoon() {
+    if (!S.rejoinSince) S.rejoinSince = Date.now();
+    if (Date.now() - S.rejoinSince > 15 * 60 * 1000) {
+      S.rejoinSince = null;
+      return endWithMessage("Disconnected", "Your connection to the room dropped. Ask the host for the code and join again.");
+    }
+    banner("Reconnecting to the room…");
+    for (const id of [...S.peers.keys()]) closePeer(id);
+    for (const id of [...screenPeers.keys()]) closeScreenPeer(id);
+    clearTimeout(S.rejoinTimer);
+    const wait = document.visibilityState === "visible" ? Math.min(1000 * 2 ** S.reconnectTries, 10000) : 8000;
+    S.reconnectTries++;
+    S.rejoinTimer = setTimeout(() => S.role === "viewer" && !S.closing && connect(), wait);
+  }
+  function checkConnectionNow() {
+    if (S.closing || S.role !== "viewer") return;
+    if (S.rejoinSince) {
+      // Unlocked or back online: try again straight away
+      clearTimeout(S.rejoinTimer);
+      S.reconnectTries = 0;
+      connect();
+    } else if (S.ws && S.ws.readyState === 1 && Date.now() - (S.lastHeard || 0) > 45000) {
+      // The phone slept and the connection silently died: close it and come back
+      try { S.ws.close(); } catch {}
+    }
+  }
+  document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && checkConnectionNow());
+  addEventListener("online", checkConnectionNow);
+  addEventListener("pageshow", checkConnectionNow);
 
   function failConnect(reason) {
     if (S.role === "host" && reason === "not_host") forgetTVRoom();
@@ -1356,6 +1470,10 @@
         $("waiting-text").textContent = `${m.hostName || "The host"} will see your name and choose whether to let you in.`;
         return;
       case "approved":
+        if (S.rejoinSince) {
+          S.rejoinSince = null;
+          banner("");
+        }
         S.ice = m.iceServers || [];
         if (S.native) try { NATIVE.setIceServers(JSON.stringify(S.ice)); } catch {}
         if (m.companion) {
@@ -1406,6 +1524,8 @@
         if (S.nativeSharing && !m.companionOf) try { NATIVE.addViewer(m.id); } catch {}
         return;
       case "viewer-left":
+        health.delete(m.id);
+        renderHealth();
         closePeer(m.id);
         if (S.native) try { NATIVE.removeViewer(m.id); } catch {}
         return;
@@ -2500,6 +2620,8 @@
 
   function cleanup() {
     S.closing = true;
+    clearTimeout(S.rejoinTimer);
+    S.rejoinSince = null;
     clearInterval(endTimer);
     S.endingWhy = null;
     $("end-card").hidden = true;

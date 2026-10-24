@@ -47,6 +47,11 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+import org.webrtc.RTCStats;
+import org.webrtc.RTCStatsReport;
 
 /**
  * Shares the whole device screen (and, on Android 10+, the sound of other apps) with each
@@ -95,8 +100,16 @@ public final class ScreenShareEngine {
     private static final class Viewer {
         PeerConnection pc;
         boolean remoteSet;
+        boolean vp8;            // switched to VP8 because the H.264 encoder produced no picture
+        int noPictureChecks;    // connected, but no frames encoded yet
+        String ice = "new";
+        String sess;            // connection id the viewer echoes back (new one after a codec switch)
         final List<IceCandidate> pending = new ArrayList<>();
     }
+
+    // Every few seconds: how each friend's connection is doing (shown on the TV, used for fallback)
+    private final ScheduledExecutorService ticker = Executors.newSingleThreadScheduledExecutor();
+    private ScheduledFuture<?> healthTask;
 
     private ScreenShareEngine(Context app) {
         this.app = app;
@@ -133,7 +146,8 @@ public final class ScreenShareEngine {
                 .createAudioDeviceModule();
         factory = PeerConnectionFactory.builder()
                 .setAudioDeviceModule(adm)
-                .setVideoEncoderFactory(new DefaultVideoEncoderFactory(egl.getEglBaseContext(), true, true))
+                // Constrained-baseline H.264 (high profile off): decodes on every phone, iPhone and browser
+                .setVideoEncoderFactory(new DefaultVideoEncoderFactory(egl.getEglBaseContext(), true, false))
                 .setVideoDecoderFactory(new DefaultVideoDecoderFactory(egl.getEglBaseContext()))
                 .createPeerConnectionFactory();
     }
@@ -222,6 +236,7 @@ public final class ScreenShareEngine {
                 audioTrack.setEnabled(sound);
 
                 sharing = true;
+                startHealthChecks();
                 emit(event("started").put("audio", sound).put("width", size[0]).put("height", size[1]));
             } catch (Exception e) {
                 Log.e(TAG, "start", e);
@@ -327,7 +342,11 @@ public final class ScreenShareEngine {
     // ------------------------------------------------------------------ viewers
 
     public void addViewer(String id) {
-        worker.execute(() -> {
+        worker.execute(() -> connectViewer(id, false));
+    }
+
+    private void connectViewer(String id, boolean vp8) {
+        {
             if (!sharing || factory == null) return;
             closeViewer(id, false);
             PeerConnection.RTCConfiguration rtc = new PeerConnection.RTCConfiguration(new ArrayList<>(iceServers));
@@ -335,6 +354,8 @@ public final class ScreenShareEngine {
             rtc.bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE;
             rtc.continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY;
             final Viewer v = new Viewer();
+            v.vp8 = vp8;
+            v.sess = vp8 ? session + "-vp8" : session;
             PeerConnection pc = factory.createPeerConnection(rtc, new PeerObserver(id));
             if (pc == null) return;
             v.pc = pc;
@@ -348,16 +369,75 @@ public final class ScreenShareEngine {
             pc.createOffer(new SdpAdapter() {
                 @Override
                 public void onCreateSuccess(SessionDescription sdp) {
-                    final SessionDescription offer = new SessionDescription(sdp.type, preferH264(sdp.description));
+                    final SessionDescription offer = new SessionDescription(sdp.type, preferCodec(sdp.description, v.vp8 ? "VP8" : "H264"));
                     worker.execute(() -> pc.setLocalDescription(new SdpAdapter() {
                         @Override
                         public void onSetSuccess() {
-                            send(id, safe(new JSONObject(), "sdp", safe(safe(new JSONObject(), "type", "offer"), "sdp", offer.description)));
+                            send(id, v.sess, safe(new JSONObject(), "sdp", safe(safe(new JSONObject(), "type", "offer"), "sdp", offer.description)));
                         }
                     }, offer));
                 }
             }, new MediaConstraints());
-        });
+        }
+    }
+
+    // ------------------------------------------------------------------ health
+
+    private void startHealthChecks() {
+        if (healthTask != null) healthTask.cancel(false);
+        healthTask = ticker.scheduleAtFixedRate(() -> worker.execute(this::checkViewers), 3, 3, TimeUnit.SECONDS);
+    }
+
+    private void stopHealthChecks() {
+        if (healthTask != null) healthTask.cancel(false);
+        healthTask = null;
+    }
+
+    /** Report each friend's connection to the page, and switch a friend to VP8 if H.264 sends nothing. */
+    private void checkViewers() {
+        if (!sharing) return;
+        for (Map.Entry<String, Viewer> e : new ArrayList<>(viewers.entrySet())) {
+            final String id = e.getKey();
+            final Viewer v = e.getValue();
+            try {
+                v.pc.getStats(report -> worker.execute(() -> onStats(id, v, report)));
+            } catch (Throwable ignored) {}
+        }
+    }
+
+    private void onStats(String id, Viewer v, RTCStatsReport report) {
+        if (viewers.get(id) != v) return;
+        long frames = 0, bytes = 0;
+        String encoder = "", codec = "";
+        Map<String, RTCStats> all = report.getStatsMap();
+        for (RTCStats st : all.values()) {
+            if (!"outbound-rtp".equals(st.getType())) continue;
+            Map<String, Object> m = st.getMembers();
+            if (!"video".equals(String.valueOf(m.get("kind")))) continue;
+            Object f = m.get("framesEncoded");
+            Object b = m.get("bytesSent");
+            if (f instanceof Number) frames += ((Number) f).longValue();
+            if (b instanceof Number) bytes += ((Number) b).longValue();
+            Object impl = m.get("encoderImplementation");
+            if (impl != null) encoder = String.valueOf(impl);
+            Object cid = m.get("codecId");
+            if (cid != null && all.get(String.valueOf(cid)) != null) {
+                Object mime = all.get(String.valueOf(cid)).getMembers().get("mimeType");
+                if (mime != null) codec = String.valueOf(mime).replace("video/", "");
+            }
+        }
+        boolean connected = "connected".equals(v.ice) || "completed".equals(v.ice);
+        if (connected && frames == 0) v.noPictureChecks++;
+        else v.noPictureChecks = 0;
+        try {
+            emit(event("viewer-stats").put("peer", id).put("ice", v.ice).put("frames", frames)
+                    .put("bytes", bytes).put("codec", codec).put("encoder", encoder).put("vp8", v.vp8));
+        } catch (Exception ignored) {}
+        // Connected for ~6 seconds and the H.264 encoder hasn't made a single frame: use VP8 instead.
+        if (!v.vp8 && v.noPictureChecks >= 2) {
+            Log.w(TAG, "no H.264 frames for " + id + "; switching to VP8");
+            connectViewer(id, true);
+        }
     }
 
     private void limitBitrate(RtpSender sender) {
@@ -380,7 +460,7 @@ public final class ScreenShareEngine {
             if (v == null) return;
             try {
                 JSONObject d = new JSONObject(json);
-                if (d.has("session") && !d.optString("session").equals(session)) return;
+                if (d.has("session") && !d.optString("session").equals(v.sess)) return;
                 if (d.has("sdp")) {
                     JSONObject s = d.getJSONObject("sdp");
                     if (!"answer".equals(s.optString("type"))) return;
@@ -415,7 +495,7 @@ public final class ScreenShareEngine {
     private void closeViewer(String id, boolean sayBye) {
         Viewer v = viewers.remove(id);
         if (v == null) return;
-        if (sayBye) send(id, safe(new JSONObject(), "bye", true));
+        if (sayBye) send(id, v.sess, safe(new JSONObject(), "bye", true));
         try { v.pc.close(); } catch (Throwable ignored) {}
         try { v.pc.dispose(); } catch (Throwable ignored) {}
     }
@@ -429,6 +509,7 @@ public final class ScreenShareEngine {
     private void stopCaptureInternal(boolean announce) {
         boolean wasSharing = sharing;
         sharing = false;
+        stopHealthChecks();
         for (String id : new ArrayList<>(viewers.keySet())) closeViewer(id, true);
         releasePlayback();
         playbackConfig = null;
@@ -450,12 +531,13 @@ public final class ScreenShareEngine {
 
     // ------------------------------------------------------------------ helpers
 
-    /** Put H.264 first: Fire TV and most phones have a hardware encoder for it. */
-    static String preferH264(String sdp) {
+    /** Put one codec first. H.264: Fire TV and most phones have a hardware encoder for it.
+     *  VP8: the fallback when the hardware encoder won't produce a picture. */
+    static String preferCodec(String sdp, String name) {
         String[] lines = sdp.split("\r\n");
         List<String> h264 = new ArrayList<>();
         for (String l : lines) {
-            if (l.startsWith("a=rtpmap:") && l.toUpperCase().contains(" H264/")) {
+            if (l.startsWith("a=rtpmap:") && l.toUpperCase().contains(" " + name + "/")) {
                 h264.add(l.substring(9, l.indexOf(' ')));
             }
         }
@@ -474,9 +556,9 @@ public final class ScreenShareEngine {
         return out.toString();
     }
 
-    private void send(String peer, JSONObject data) {
+    private void send(String peer, String sess, JSONObject data) {
         try {
-            data.put("session", session);
+            data.put("session", sess);
             emit(event("signal").put("peer", peer).put("data", data));
         } catch (Exception ignored) {}
     }
@@ -504,14 +586,23 @@ public final class ScreenShareEngine {
 
         @Override
         public void onIceCandidate(IceCandidate c) {
+            Viewer v = viewers.get(id);
+            String sess = v != null && v.sess != null ? v.sess : session;
             try {
-                send(id, new JSONObject().put("candidate", new JSONObject()
+                send(id, sess, new JSONObject().put("candidate", new JSONObject()
                         .put("candidate", c.sdp).put("sdpMid", c.sdpMid).put("sdpMLineIndex", c.sdpMLineIndex)));
             } catch (Exception ignored) {}
         }
 
         @Override public void onSignalingChange(PeerConnection.SignalingState s) {}
-        @Override public void onIceConnectionChange(PeerConnection.IceConnectionState s) {}
+        @Override public void onIceConnectionChange(PeerConnection.IceConnectionState s) {
+            final String state = s.name().toLowerCase();
+            worker.execute(() -> {
+                Viewer v = viewers.get(id);
+                if (v != null) v.ice = state;
+                try { emit(event("viewer-state").put("peer", id).put("ice", state)); } catch (Exception ignored) {}
+            });
+        }
         @Override public void onIceConnectionReceivingChange(boolean b) {}
         @Override public void onIceGatheringChange(PeerConnection.IceGatheringState s) {}
         @Override public void onIceCandidatesRemoved(IceCandidate[] c) {}

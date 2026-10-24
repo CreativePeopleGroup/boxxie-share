@@ -54,6 +54,9 @@ with sync_playwright() as p:
     check(wait(lambda: friend.evaluate(viewing), 20), "Sarah sees the TV's screen live")
     check(friend.evaluate("document.getElementById('film').srcObject.getAudioTracks().length") == 1, "and hears it")
     check(any(c.startswith("add:") for c in tv.evaluate("window.__nativeCalls")), "each friend is handed to the app's engine")
+    check(wait(lambda: "Sarah" in tv.inner_text("#viewer-health") and "getting the picture" in tv.inner_text("#viewer-health"), 10), "the TV shows that Sarah is getting the picture")
+    check(friend.is_hidden("#screen-diag"), "Sarah sees no 'waiting' message once the picture arrives")
+    tv.screenshot(path=f"{OUT}/native-2b-health.png")
 
     # Open another app: Home
     tap(tv, "#ctl-reshare")
