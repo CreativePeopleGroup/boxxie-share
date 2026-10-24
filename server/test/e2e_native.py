@@ -57,7 +57,9 @@ with sync_playwright() as p:
 
     # Open another app: Home
     tap(tv, "#ctl-reshare")
-    check("home" in tv.evaluate("window.__nativeCalls"), "'Open another app' sends the TV to its home screen while sharing continues")
+    tv.wait_for_selector("#apps-panel:not([hidden])", timeout=5000)
+    tv.locator(".app-tile", has_text="TV home screen").click()
+    check("home" in tv.evaluate("window.__nativeCalls"), "'Open another app' lists the TV's apps; TV home screen goes home while sharing continues")
 
     # Ricky's phone lets people in while the TV shows another app
     tap(tv, "#pair-phone"); tv.wait_for_selector("#pair-panel:not([hidden])")

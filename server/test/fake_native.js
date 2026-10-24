@@ -23,11 +23,14 @@
       try { ice = JSON.parse(cfg).iceServers || []; } catch (e) {}
       if (window.__denyNext) { window.__denyNext = false; return emit({ type: "denied" }); }
       stream = makeStream(); session = Math.random().toString(36).slice(2);
+      try { sessionStorage.setItem("fakeSharing", "1"); } catch (e) {}
       emit({ type: "started", audio: true });
     },
     setIceServers: (j) => { try { ice = JSON.parse(j); } catch (e) {} },
     addViewer: async (id) => {
       window.__nativeCalls.push("add:" + id);
+      // Like the real app, sharing outlives a page reload: pick it back up
+      if (!stream && sessionStorage.getItem("fakeSharing")) { stream = makeStream(); session = Math.random().toString(36).slice(2); }
       if (!stream) return;
       if (pcs.has(id)) pcs.get(id).close();
       const pc = new RTCPeerConnection({ iceServers: ice });
@@ -47,10 +50,14 @@
     removeViewer: (id) => { window.__nativeCalls.push("remove:" + id); const pc = pcs.get(id); if (pc) pc.close(); pcs.delete(id); },
     stopScreenShare: () => {
       window.__nativeCalls.push("stop");
+      try { sessionStorage.removeItem("fakeSharing"); } catch (e) {}
       for (const [id, pc] of pcs) { emit({ type: "signal", peer: id, data: { session, bye: true } }); pc.close(); }
       pcs.clear(); clearInterval(timer); if (stream) stream.getTracks().forEach((t) => t.stop()); stream = null;
     },
     goHome: () => window.__nativeCalls.push("home"),
+    isSharing: () => !!sessionStorage.getItem("fakeSharing"),
+    listApps: () => JSON.stringify([{ pkg: "com.example.player", label: "Home Videos", icon: "" }, { pkg: "com.example.music", label: "Music", icon: "" }]),
+    launchApp: (pkg) => window.__nativeCalls.push("launch:" + pkg),
     // Update button stand-in: pretends 1.0.6 is out; window.__updateNone = true means up to date
     appInfo: () => JSON.stringify({ code: 5, name: "1.0.5", canUpdate: true }),
     checkUpdate: () => {

@@ -97,6 +97,9 @@ public class MainActivity extends Activity {
 
         WebSettings s = web.getSettings();
         s.setTextZoom(100); // the page sizes itself to the TV; ignore the system text-size setting
+        // While you watch another app, keep Boxxie's page (which lets friends in and connects them)
+        // running: by default Android lets a hidden web page's process be killed to save memory.
+        if (Build.VERSION.SDK_INT >= 26) web.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
         s.setMediaPlaybackRequiresUserGesture(false);
@@ -125,7 +128,7 @@ public class MainActivity extends Activity {
         web.setFocusable(true);
         web.setFocusableInTouchMode(true);
 
-        if (savedInstanceState != null) {
+        if (savedInstanceState != null && !savedInstanceState.getBoolean("freshPage")) {
             web.restoreState(savedInstanceState);
         } else {
             web.loadUrl(BuildConfig.APP_URL);
@@ -175,6 +178,22 @@ public class MainActivity extends Activity {
     // ------------------------------------------------------------------ navigation
 
     private class ShellClient extends WebViewClient {
+        /** If Android still stops the page (very low memory), rebuild it instead of crashing the app.
+         *  Screen sharing keeps running in the background service; the page rejoins the room. */
+        @Override
+        public boolean onRenderProcessGone(WebView view, android.webkit.RenderProcessGoneDetail detail) {
+            if (view != web) return true;
+            runOnUiThread(() -> {
+                try {
+                    ((android.view.ViewGroup) web.getParent()).removeView(web);
+                    web.destroy();
+                } catch (Exception ignored) {}
+                web = null;
+                recreate();
+            });
+            return true;
+        }
+
         @Override
         public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
             ourPage = url != null && isOurSite(Uri.parse(url));
@@ -524,10 +543,11 @@ public class MainActivity extends Activity {
             exitFullscreen();
             return;
         }
+        if (web == null) return;
         // Let the page decide (e.g. "Leave the room?") so Back never quits mid-film by accident.
         web.evaluateJavascript("(window.boxxieBack ? window.boxxieBack() : false)", value -> {
             if (!"true".equals(value)) {
-                if (web.canGoBack()) web.goBack();
+                if (web != null && web.canGoBack()) web.goBack();
                 else finish();
             }
         });
@@ -616,6 +636,30 @@ public class MainActivity extends Activity {
             return updater.info();
         }
 
+        /** Is the TV screen still being shared? (After the page reloads, it rejoins the room.) */
+        @JavascriptInterface
+        public boolean isSharing() {
+            return engine != null && engine.isSharing();
+        }
+
+        /** Apps on this TV, for the "Open an app" list: [{pkg, label, icon (data URL)}]. */
+        @JavascriptInterface
+        public String listApps() {
+            return AppList.json(MainActivity.this);
+        }
+
+        /** Open one of the TV's apps (sharing carries on in the background). */
+        @JavascriptInterface
+        public void launchApp(String pkg) {
+            if (!ourPage || pkg == null) return;
+            runOnUiThread(() -> {
+                if (!AppList.launch(MainActivity.this, pkg)) {
+                    Intent home = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    try { startActivity(home); } catch (Exception e) { moveTaskToBack(true); }
+                }
+            });
+        }
+
         @JavascriptInterface
         public void checkUpdate() {
             if (ourPage) updater.check();
@@ -642,19 +686,20 @@ public class MainActivity extends Activity {
     @Override
     protected void onSaveInstanceState(Bundle outState) {
         super.onSaveInstanceState(outState);
-        web.saveState(outState);
+        if (web != null) web.saveState(outState);
+        else outState.putBoolean("freshPage", true); // the page had stopped: load it again from scratch
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        web.onResume();
+        if (web != null) web.onResume();
     }
 
     @Override
     protected void onPause() {
         // Keep sharing going if the screen saver kicks in; only pause when actually leaving.
-        if (isFinishing()) web.onPause();
+        if (isFinishing() && web != null) web.onPause();
         super.onPause();
     }
 

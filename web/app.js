@@ -246,6 +246,7 @@
     if (after && after.device) return showDeviceApproval(after.device);
     if (after && after.pair) return joinAsPhone(after.pair[0], after.pair[1]);
     if (after && after.join) $("join-code").value = formatCode(after.join);
+    if (!after && resumeTVRoom()) return;
     show("home");
     if (after && after.join) setTimeout(() => $("join-start").focus(), 60);
   }
@@ -817,6 +818,7 @@
       S.hostToken = data.hostToken;
       enterRoom();
       connect();
+      rememberTVRoom();
     } catch {
       showError(err, ERRORS.network);
     } finally {
@@ -961,7 +963,7 @@
   }
   $("ctl-reshare").onclick = async () => {
     if (S.native) {
-      if (S.nativeSharing) return NATIVE.goHome();
+      if (S.nativeSharing) return openApps();
       const ok = await nativeStart();
       if (ok) {
         useNativeScreen();
@@ -1029,6 +1031,81 @@
     updateLabel("Starting…");
     try { NATIVE.installUpdate(); } catch { updating = false; }
   };
+
+  // ----- TV app: choose one of the TV's apps to open while sharing -----
+  let appsCache = null;
+  function openApps() {
+    if (typeof NATIVE.listApps !== "function") return NATIVE.goHome(); // older app versions
+    if (!appsCache) {
+      try { appsCache = JSON.parse(NATIVE.listApps()) || []; } catch { appsCache = []; }
+    }
+    const grid = $("apps-grid");
+    grid.replaceChildren();
+    const tile = (label, icon, onPick) => {
+      const b = document.createElement("button");
+      b.className = "app-tile";
+      b.type = "button";
+      b.append(icon);
+      const t = document.createElement("span");
+      t.textContent = label;
+      b.append(t);
+      b.onclick = () => {
+        $("apps-panel").hidden = true;
+        onPick();
+      };
+      return b;
+    };
+    const home = document.createElement("span");
+    home.className = "app-home";
+    home.innerHTML = '<svg><use href="#i-home"/></svg>';
+    grid.append(tile("TV home screen", home, () => NATIVE.goHome()));
+    for (const a of appsCache) {
+      const img = document.createElement("img");
+      img.alt = "";
+      if (a.icon) img.src = a.icon;
+      grid.append(tile(a.label || a.pkg, img, () => NATIVE.launchApp(a.pkg)));
+    }
+    $("apps-panel").hidden = false;
+    const first = grid.querySelectorAll(".app-tile")[1] || grid.querySelector(".app-tile");
+    if (first) first.focus();
+  }
+  $("apps-close").onclick = () => {
+    $("apps-panel").hidden = true;
+    $("ctl-reshare").focus();
+  };
+
+  // ----- TV app: if Android restarts Boxxie's page while you're sharing, go straight back in -----
+  function rememberTVRoom() {
+    if (S.role === "host" && S.native && S.code) store.set("tvRoom", { code: S.code, hostToken: S.hostToken, at: Date.now() });
+  }
+  setInterval(() => S.ws && rememberTVRoom(), 30000);
+  function forgetTVRoom() {
+    store.set("tvRoom", null);
+  }
+  function resumeTVRoom() {
+    const r = store.get("tvRoom");
+    if (!r || !NATIVE || !r.code) return false;
+    let sharing = false;
+    try { sharing = typeof NATIVE.isSharing === "function" && !!NATIVE.isSharing(); } catch {}
+    // The room keeps waiting 3 minutes for its host; after that it has closed.
+    if (!sharing && Date.now() - r.at > 150000) {
+      forgetTVRoom();
+      return false;
+    }
+    S.role = "host";
+    S.myId = "host";
+    S.myName = myName();
+    S.code = r.code;
+    S.hostToken = r.hostToken;
+    S.source = "screen";
+    S.native = true;
+    enterRoom();
+    if (sharing) useNativeScreen();
+    else nativeStopped();
+    connect();
+    toast(sharing ? "Back in your room. Still sharing." : "Back in your room. Press Share the screen again.", 6000);
+    return true;
+  }
 
   // ----- Android app: whole-screen sharing from the background -----
   // The page hands each viewer to the app's engine; the engine's offers/answers travel over the
@@ -1250,6 +1327,7 @@
   }
 
   function failConnect(reason) {
+    if (S.role === "host" && reason === "not_host") forgetTVRoom();
     if (S.role === "host") {
       banner(ERRORS[reason] || ERRORS.network);
       return;
@@ -1355,6 +1433,7 @@
         return;
       case "room-closed":
         S.closing = true;
+        forgetTVRoom();
         if (S.role === "host") {
           cleanup();
           show("home");
@@ -2459,6 +2538,7 @@
     S.wakeLock = null;
   }
   function leave() {
+    forgetTVRoom();
     cleanup();
     $("invite-panel").hidden = true;
     S.role = null;
