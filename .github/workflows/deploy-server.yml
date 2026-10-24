@@ -36,13 +36,29 @@ jobs:
 
       - name: Deploy to Cloudflare
         id: deploy
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: server
+        working-directory: server
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ORIGIN: ${{ steps.origin.outputs.value }}
+          CONTACT_EMAIL: ${{ vars.CONTACT_EMAIL }}
+        run: |
+          set -o pipefail
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::error::Add the CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID repository secrets (README step 2)."
+            exit 1
+          fi
+          EXTRA=""
+          if [ -n "$CONTACT_EMAIL" ]; then EXTRA="--var CONTACT_EMAIL:$CONTACT_EMAIL"; fi
           # CONTACT_EMAIL (repository variable) also receives abuse reports, unless REPORT_EMAIL is set.
-          command: deploy --var ALLOWED_ORIGINS:${{ steps.origin.outputs.value }} ${{ vars.CONTACT_EMAIL && format('--var CONTACT_EMAIL:{0}', vars.CONTACT_EMAIL) || '' }}
+          if ! npx --yes wrangler@4 deploy --var "ALLOWED_ORIGINS:$ORIGIN" $EXTRA 2>&1 | tee deploy.log; then
+            # Show the reason on the run page, not only in the raw log.
+            grep -E "ERROR|✘|error|Error" deploy.log | head -20 | sed 's/^/::error::/'
+            exit 1
+          fi
+          URL="$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' deploy.log | head -1)"
+          echo "deployment-url=$URL" >> "$GITHUB_OUTPUT"
+          echo "::notice::Server address: $URL"
 
       - name: Show the server address
         run: |
