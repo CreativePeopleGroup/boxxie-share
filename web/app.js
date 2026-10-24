@@ -228,7 +228,12 @@
     store.set("session", S.session);
     $("me-name").textContent = myName();
     greet();
-    $("me-email").textContent = (S.me.user && S.me.user.email) || "an account without an email";
+    $("me-email").textContent = (S.me.user && S.me.user.email) || (S.me.user ? S.me.user.name : "");
+    const fc = S.me.user && S.me.user.friendCode;
+    $("my-friend-code").textContent = fc ? `${fc.slice(0, 4)}-${fc.slice(4)}` : "…";
+    $("friend-code-share").hidden = !navigator.share;
+    $("totp-status").textContent = S.me.user && S.me.user.totp ? "On. Signing in on a new device asks for the number from your app." : "Add Google Authenticator as an extra lock.";
+    setLabel($("totp-toggle"), S.me.user && S.me.user.totp ? "Turn off" : "Set up");
     renderAvatar($("me-av"), S.session.user, 0);
     const incoming = S.me.friends.filter((f) => f.status === "incoming").length;
     $("friends-badge").textContent = String(incoming);
@@ -317,6 +322,57 @@
     loadMe();
   };
   $("friends-back").onclick = () => show("home");
+  $("friend-code-copy").onclick = async () => {
+    try {
+      await navigator.clipboard.writeText($("my-friend-code").textContent);
+      toast("Friend code copied.");
+    } catch {}
+  };
+  $("friend-code-share").onclick = async () => {
+    try {
+      await navigator.share({ title: "Add me on Boxxie Share", text: `Add me on Boxxie Share: my friend code is ${$("my-friend-code").textContent}\n${SITE}` });
+    } catch {}
+  };
+  $("code-reset").onclick = async () => {
+    if (!confirm("Get a new Boxxie code? Your old code stops working straight away. Devices already signed in stay signed in.")) return;
+    const r = await api("/api/me/code/reset", { method: "POST" });
+    if (r.ok && r.data.code) showNewCode(r.data.code, myName());
+    else toast("Couldn't make a new code. Try again.");
+  };
+  $("totp-toggle").onclick = async () => {
+    const on = S.me && S.me.user && S.me.user.totp;
+    const panel = $("totp-panel");
+    if (!panel.hidden) return (panel.hidden = true);
+    $("totp-msg").textContent = "";
+    $("totp-code").value = "";
+    $("totp-setup-box").hidden = on;
+    $("totp-off-text").hidden = !on;
+    setLabel($("totp-submit"), on ? "Turn off" : "Turn on");
+    if (!on) {
+      const r = await api("/api/me/totp/setup", { method: "POST" });
+      if (!r.ok) return toast("Couldn't start. Try again.");
+      const box = $("totp-qr");
+      box.replaceChildren();
+      try { box.append(window.BoxxieQR.svg(r.data.uri, { size: 180, dark: "#142130", light: "#ffffff" })); } catch {}
+      $("totp-secret").textContent = r.data.secret.replace(/(.{4})/g, "$1 ").trim();
+    }
+    panel.hidden = false;
+    $("totp-code").focus();
+  };
+  $("totp-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const on = S.me && S.me.user && S.me.user.totp;
+    const code = $("totp-code").value.replace(/\D/g, "");
+    const r = await api(on ? "/api/me/totp/disable" : "/api/me/totp/confirm", { method: "POST", body: { code } });
+    if (!r.ok) {
+      $("totp-msg").textContent = r.data.error === "expired" ? "That took a while. Press Set up again." : "That number isn't right. Type the newest one from the app.";
+      return;
+    }
+    $("totp-panel").hidden = true;
+    toast(on ? "Authenticator lock is off." : "Authenticator lock is on.");
+    loadMe();
+  });
+
   $("delete-account").onclick = async () => {
     if (!confirm("Delete your Boxxie Share account? Your friends list and invites are removed for good.")) return;
     await api("/api/me/delete", { method: "POST" });
@@ -366,12 +422,19 @@
     e.preventDefault();
     const email = $("friend-email").value.trim();
     if (!email) return;
-    const r = await api("/api/friends/add", { method: "POST", body: { email, return: SITE } });
+    const byCode = !email.includes("@");
+    const r = await api("/api/friends/add", { method: "POST", body: byCode ? { code: email } : { email, return: SITE } });
     $("friend-add-msg").textContent = r.ok
       ? r.data.status === "friends"
-        ? `You and ${email} are now friends.`
-        : `Request sent to ${email}. They'll see it when they sign in.`
-      : { bad_email: "That doesn't look like an email address.", self: "That's your own email.", too_many: "You've sent a lot of requests today. Try again tomorrow." }[r.data.error] || "Couldn't send that request. Try again.";
+        ? `You're now friends.`
+        : byCode ? "Request sent. They'll see it on their Friends screen." : `Request sent to ${email}. They'll see it when they sign in.`
+      : {
+          bad_email: "That doesn't look like an email address.",
+          bad_code: "Friend codes are 8 letters and numbers, like K7FQ-2MXP.",
+          no_such_code: "No one has that friend code. Check it with your friend.",
+          self: "That's your own code.",
+          too_many: "You've sent a lot of requests today. Try again tomorrow.",
+        }[r.data.error] || "Couldn't send that request. Try again.";
     if (r.ok) $("friend-email").value = "";
     loadMe();
   });
@@ -398,13 +461,20 @@
     $("signin-facebook").hidden = inApp || !prov.facebook;
     $("signin-inapp").hidden = !(inApp && (prov.google || prov.facebook));
     $("email-form").hidden = !prov.email;
-    $("signin-or").hidden = !prov.email || (inApp ? false : !(prov.google || prov.facebook));
+    $("code-signin").hidden = !prov.code;
+    $("code-otp-row").hidden = true;
+    const social = !inApp && (prov.google || prov.facebook);
+    // "or" sits between whichever blocks are showing
+    $("signin-or").hidden = !prov.email || !(social || prov.code || inApp);
     if (!SERVER) showError($("signin-error"), ERRORS.no_server);
-    else if (r.ok && !prov.email && !prov.google && !prov.facebook)
+    else if (r.ok && !prov.email && !prov.google && !prov.facebook && !prov.code)
       showError($("signin-error"), "Sign-in isn't switched on yet. Whoever runs this Boxxie Share needs to add an email, Google or Facebook key (README, Step 5).");
     else if (!r.ok) showError($("signin-error"), "Can't reach the Boxxie Share server right now. Check your internet connection and try again.");
     if (isTV || inApp) startDeviceSignin();
-    setTimeout(() => (isTV ? $("email-send") : $("signin-google").hidden ? $("signin-email") : $("signin-google")).focus(), 60);
+    setTimeout(() => {
+      const first = !$("signin-google").hidden ? $("signin-google") : prov.code ? $("signin-boxxcode") : $("signin-email");
+      if (!isTV) first.focus();
+    }, 60);
   }
   $("signin-google").onclick = () => (location.href = `${SERVER}/auth/google/start?return=${encodeURIComponent(SITE)}`);
   $("signin-facebook").onclick = () => (location.href = `${SERVER}/auth/facebook/start?return=${encodeURIComponent(SITE)}`);
@@ -449,6 +519,84 @@
     }
     stopDevicePolling();
     setSession(r.data);
+  });
+
+  // ----- Boxxie codes: your own sign-in code, no email needed -----
+  $("boxxcode-show").onclick = () => {
+    const i = $("signin-boxxcode");
+    const showIt = i.type === "password";
+    i.type = showIt ? "text" : "password";
+    $("boxxcode-show").textContent = showIt ? "Hide" : "Show";
+    $("boxxcode-show").setAttribute("aria-pressed", String(showIt));
+  };
+  $("code-signin-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const code = $("signin-boxxcode").value.trim();
+    if (!code) return showError($("signin-error"), "Type your Boxxie code.");
+    const otpVisible = !$("code-otp-row").hidden;
+    const body = { code };
+    if (otpVisible) body.otp = $("signin-otp").value.replace(/\D/g, "");
+    $("code-signin-btn").disabled = true;
+    const r = await api("/auth/code/signin", { method: "POST", body });
+    $("code-signin-btn").disabled = false;
+    if (r.ok && r.data.needOtp) {
+      $("code-otp-row").hidden = false;
+      showError($("signin-error"), "");
+      $("signin-otp").focus();
+      return;
+    }
+    if (!r.ok) {
+      return showError($("signin-error"), {
+        wrong_code: "That code isn't right. It looks like BOXX-XXXX-XXXX-XXXX.",
+        wrong_otp: "That number isn't right. Use the newest number in your authenticator app.",
+        too_many_attempts: ERRORS.too_many_attempts,
+      }[r.data.error] || ERRORS.network);
+    }
+    stopDevicePolling();
+    setSession(r.data);
+  });
+  $("code-create-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = $("new-name").value.trim();
+    if (!name) return showError($("signin-error"), "Type your name first.");
+    $("new-create").disabled = true;
+    const r = await api("/auth/code/create", { method: "POST", body: { name } });
+    $("new-create").disabled = false;
+    if (!r.ok) {
+      return showError($("signin-error"), { too_many: "Lots of accounts were made from this connection. Try again in an hour." }[r.data.error] || ERRORS.network);
+    }
+    stopDevicePolling();
+    S.pendingSession = { token: r.data.token, user: r.data.user };
+    showNewCode(r.data.code, r.data.user.name);
+  });
+  function showNewCode(code, name) {
+    $("newcode-value").value = code;
+    $("newcode-user").value = name || "";
+    setLabel($("newcode-copy"), "Copy");
+    show("newcode");
+  }
+  $("newcode-copy").onclick = async () => {
+    try {
+      await navigator.clipboard.writeText($("newcode-value").value);
+      setLabel($("newcode-copy"), "Copied");
+    } catch {
+      $("newcode-value").select();
+    }
+  };
+  $("newcode-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    // Offer to save it in the phone's or browser's passwords (Keychain, Google Password Manager).
+    try {
+      if (window.PasswordCredential && navigator.credentials) {
+        await navigator.credentials.store(new PasswordCredential({ id: $("newcode-user").value || "Boxxie Share", password: $("newcode-value").value, name: "Boxxie Share" }));
+      }
+    } catch {}
+    $("newcode-value").value = "";
+    if (S.pendingSession) {
+      const sess = S.pendingSession;
+      S.pendingSession = null;
+      setSession(sess);
+    } else show("friends");
   });
 
   // ----- TV: sign in by scanning a QR code with your phone -----

@@ -87,6 +87,56 @@ function timingSafeEq(a, b) {
   for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return d === 0;
 }
+// "BOXX-7F3K-9QPL-22MD" → "7F3K9QPL22MD" (spaces, dashes, lower case and the BOXX prefix are all fine)
+function normaliseSigninCode(c) {
+  let s = String(c || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (s.length === 16 && s.startsWith("BOXX")) s = s.slice(4);
+  return /^[B-DF-HJ-NP-TV-XZ2-9]{12}$/.test(s) ? s : null;
+}
+// ---------- authenticator apps (TOTP, RFC 6238: Google Authenticator, Microsoft, Apple Passwords) ----------
+const B32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+function base32(bytes) {
+  let bits = 0, val = 0, out = "";
+  for (const b of bytes) {
+    val = (val << 8) | b; bits += 8;
+    while (bits >= 5) { out += B32[(val >>> (bits - 5)) & 31]; bits -= 5; }
+  }
+  if (bits > 0) out += B32[(val << (5 - bits)) & 31];
+  return out;
+}
+function unbase32(str) {
+  const out = [];
+  let bits = 0, val = 0;
+  for (const ch of String(str).toUpperCase().replace(/[^A-Z2-7]/g, "")) {
+    val = (val << 5) | B32.indexOf(ch); bits += 5;
+    if (bits >= 8) { out.push((val >>> (bits - 8)) & 255); bits -= 8; }
+  }
+  return new Uint8Array(out);
+}
+async function totpAt(secret, counter) {
+  const key = await crypto.subtle.importKey("raw", unbase32(secret), { name: "HMAC", hash: "SHA-1" }, false, ["sign"]);
+  const msg = new Uint8Array(8);
+  let c = counter;
+  for (let i = 7; i >= 0; i--) { msg[i] = c & 255; c = Math.floor(c / 256); }
+  const h = new Uint8Array(await crypto.subtle.sign("HMAC", key, msg));
+  const o = h[h.length - 1] & 15;
+  const n = ((h[o] & 127) << 24) | (h[o + 1] << 16) | (h[o + 2] << 8) | h[o + 3];
+  return String(n % 1000000).padStart(6, "0");
+}
+// Returns the matching time step (so it can't be used twice), or null. Allows 30 s either side.
+export async function totpCheck(secret, code, now = Date.now()) {
+  const c = String(code || "").replace(/\D/g, "");
+  if (c.length !== 6) return null;
+  const step = Math.floor(now / 30000);
+  for (const d of [0, -1, 1]) if ((await totpAt(secret, step + d)) === c) return step + d;
+  return null;
+}
+export { totpAt };
+
+function normaliseFriendCode(c) {
+  const s = String(c || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  return /^[B-DF-HJ-NP-TV-XZ2-9]{8}$/.test(s) ? s : null;
+}
 function publicUser(u) {
   return u ? { id: u.id, name: u.name, photo: u.photo || null } : null;
 }
@@ -97,6 +147,7 @@ export function providers(env) {
     google: !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
     facebook: !!(env.FACEBOOK_APP_ID && env.FACEBOOK_APP_SECRET),
     email: !!(env.EMAIL_PROVIDER && (env.EMAIL_PROVIDER === "log" ? env.DEV === "1" : env.EMAIL_API_KEY && env.EMAIL_FROM)),
+    code: env.CODE_SIGNIN !== "0", // Boxxie codes: no outside service needed
   };
 }
 
@@ -213,6 +264,90 @@ export class Directory extends DurableObject {
     await this._saveUser(user);
     await this.ctx.storage.put(identKey, user.id);
     return user;
+  }
+
+  // --- Boxxie codes: your own sign-in code, no email or outside service needed ---
+  async createCodeAccount(name, label) {
+    const user = { id: randomHex(12), email: null, name: cleanDisplayName(name, "Friend"), photo: null, created: Date.now(), idents: [] };
+    await this._saveUser(user);
+    const code = await this._newSigninCode(user);
+    await this._friendCode(user);
+    return { token: await this._newSession(user.id, label), user: publicUser(user), code };
+  }
+  async _newSigninCode(user) {
+    if (user.codeHash) await this.ctx.storage.delete(`signin:${user.codeHash}`);
+    const raw = randomFrom(DEVICE_ALPHABET, 12);
+    user.codeHash = await sha256("signin:" + raw);
+    await this.ctx.storage.put(`signin:${user.codeHash}`, user.id);
+    await this._saveUser(user);
+    return `BOXX-${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8)}`;
+  }
+  async signInWithCode(code, label, otp) {
+    const raw = normaliseSigninCode(code);
+    if (!raw) return { error: "wrong_code" };
+    const id = await this.ctx.storage.get(`signin:${await sha256("signin:" + raw)}`);
+    const user = id ? await this._user(id) : null;
+    if (!user || user.banned) return { error: "wrong_code" };
+    if (user.totp) {
+      // Extra lock switched on: the code from their authenticator app is needed too.
+      if (!otp) return { needOtp: true };
+      const now = Date.now();
+      const fails = (user.otpFails || []).filter((t) => now - t < 15 * 60 * 1000);
+      if (fails.length >= 10) return { error: "too_many_attempts" };
+      const step = await totpCheck(user.totp, otp, now);
+      if (step === null || step <= (user.totpLast || 0)) {
+        user.otpFails = [...fails, now];
+        await this._saveUser(user);
+        return { error: "wrong_otp" };
+      }
+      user.totpLast = step;
+      user.otpFails = [];
+      await this._saveUser(user);
+    }
+    return { token: await this._newSession(user.id, label), user: publicUser(user) };
+  }
+  async totpSetup(userId) {
+    const u = await this._user(userId);
+    if (!u) return null;
+    const secret = base32(crypto.getRandomValues(new Uint8Array(20)));
+    await this.ctx.storage.put(`totppending:${userId}`, { secret, expires: Date.now() + 15 * 60 * 1000 });
+    const label = encodeURIComponent(`Boxxie Share:${u.name}`);
+    return { secret, uri: `otpauth://totp/${label}?secret=${secret}&issuer=Boxxie%20Share&algorithm=SHA1&digits=6&period=30` };
+  }
+  async totpConfirm(userId, code) {
+    const u = await this._user(userId);
+    const pend = await this._get(`totppending:${userId}`);
+    if (!u || !pend) return { error: "expired" };
+    const step = await totpCheck(pend.secret, code);
+    if (step === null) return { error: "wrong_otp" };
+    u.totp = pend.secret;
+    u.totpLast = step;
+    await this._saveUser(u);
+    await this.ctx.storage.delete(`totppending:${userId}`);
+    return { ok: true };
+  }
+  async totpDisable(userId, code) {
+    const u = await this._user(userId);
+    if (!u || !u.totp) return { ok: true };
+    if ((await totpCheck(u.totp, code)) === null) return { error: "wrong_otp" };
+    delete u.totp;
+    delete u.totpLast;
+    await this._saveUser(u);
+    return { ok: true };
+  }
+  async resetSigninCode(userId) {
+    const u = await this._user(userId);
+    return u ? this._newSigninCode(u) : null;
+  }
+  async _friendCode(user) {
+    if (user.friendCode) return user.friendCode;
+    let c;
+    do c = randomFrom(DEVICE_ALPHABET, 8);
+    while (await this.ctx.storage.get(`friendcode:${c}`));
+    user.friendCode = c;
+    await this.ctx.storage.put(`friendcode:${c}`, user.id);
+    await this._saveUser(user);
+    return c;
   }
 
   // --- sessions ---
@@ -373,6 +508,8 @@ export class Directory extends DurableObject {
     }
     await this.ctx.storage.delete(`friends:${userId}`);
     await this.ctx.storage.delete(`blocks:${userId}`);
+    if (u.codeHash) await this.ctx.storage.delete(`signin:${u.codeHash}`);
+    if (u.friendCode) await this.ctx.storage.delete(`friendcode:${u.friendCode}`);
     await this.ctx.storage.delete(`invites:${userId}`);
     await this.ctx.storage.delete(`user:${userId}`); // sessions stop working: they point at a missing account
     for (const ws of this.ctx.getWebSockets(userId)) try { ws.close(4001, "deleted"); } catch {}
@@ -480,6 +617,30 @@ export class Directory extends DurableObject {
     return true;
   }
 
+  async _friendRate(userId) {
+    const rk = `friendrate:${userId}`;
+    const now = Date.now();
+    const recent = ((await this.ctx.storage.get(rk)) || []).filter((t) => now - t < DAY);
+    if (recent.length >= 30) return false;
+    recent.push(now);
+    await this.ctx.storage.put(rk, recent);
+    return true;
+  }
+  async addFriendByCode(userId, code) {
+    const me = await this._user(userId);
+    if (!me) return { error: "no_user" };
+    const c = normaliseFriendCode(code);
+    if (!c) return { error: "bad_code" };
+    if (!(await this._friendRate(userId))) return { error: "too_many" };
+    const otherId = await this.ctx.storage.get(`friendcode:${c}`);
+    if (!otherId) return { error: "no_such_code" };
+    if (otherId === userId) return { error: "self" };
+    if (await this.blockedEither(userId, otherId)) return { status: "outgoing" };
+    await this._setFriend(userId, otherId, "pending", userId);
+    const m = await this._friendsMap(userId);
+    return { status: m[otherId] ? m[otherId].status : "outgoing" };
+  }
+
   async addFriend(userId, email) {
     const me = await this._user(userId);
     if (!me) return { error: "no_user" };
@@ -530,7 +691,8 @@ export class Directory extends DurableObject {
     friends.sort((x, y) => (x.status === y.status ? x.name.localeCompare(y.name) : x.status === "incoming" ? -1 : y.status === "incoming" ? 1 : x.status === "friends" ? -1 : 1));
     const invites = ((await this.ctx.storage.get(`invites:${userId}`)) || []).filter((i) => i.expires > Date.now());
     const blocked = Object.entries(await this._blocks(userId)).map(([id, b]) => ({ id, name: b.name }));
-    return { user: { ...publicUser(u), email: u.email }, friends, invites, blocked };
+    const friendCode = await this._friendCode(u);
+    return { user: { ...publicUser(u), email: u.email, friendCode, hasCode: !!u.codeHash, totp: !!u.totp }, friends, invites, blocked };
   }
 
   // --- room invites ---
@@ -712,6 +874,26 @@ export async function handleAccounts(request, env, ctx) {
     if (!ok) return json({ error: "email_failed" }, 502);
     return json({ ok: true }, 200);
   }
+  // ----- Boxxie codes -----
+  if (p === "/auth/code/create" && request.method === "POST") {
+    if (!prov.code) return json({ error: "not_configured" }, 404);
+    const name = String((await body()).name || "").trim();
+    if (!name) return json({ error: "need_name" }, 400);
+    if (!(await limiter.hit("signup", 5, 60 * 60 * 1000))) return json({ error: "too_many" }, 429);
+    return json(await dir.createCodeAccount(name, label()), 200);
+  }
+  if (p === "/auth/code/signin" && request.method === "POST") {
+    if (!prov.code) return json({ error: "not_configured" }, 404);
+    if (await limiter.blocked("joinfail", 8, 15 * 60 * 1000)) return json({ error: "too_many_attempts" }, 429);
+    const b = await body();
+    const r = await dir.signInWithCode(b.code, label(), b.otp);
+    if (r.needOtp) return json(r, 200);
+    if (r.error) {
+      await limiter.hit("joinfail", 8, 15 * 60 * 1000);
+      return json(r, 400);
+    }
+    return json(r, 200);
+  }
   if (p === "/auth/email/verify" && request.method === "POST") {
     const b = await body();
     const r = await dir.verifyMagic({ token: b.token, email: cleanEmail(b.email), code: String(b.code || "") }, label());
@@ -787,12 +969,29 @@ export async function handleAccounts(request, env, ctx) {
       await dir.deleteUser(u.id);
       return json({ ok: true }, 200);
     }
+    if (p === "/api/me/totp/setup" && request.method === "POST") return json(await dir.totpSetup(u.id), 200);
+    if (p === "/api/me/totp/confirm" && request.method === "POST") {
+      const r = await dir.totpConfirm(u.id, String((await body()).code || ""));
+      return json(r, r.error ? 400 : 200);
+    }
+    if (p === "/api/me/totp/disable" && request.method === "POST") {
+      const r = await dir.totpDisable(u.id, String((await body()).code || ""));
+      return json(r, r.error ? 400 : 200);
+    }
+    if (p === "/api/me/code/reset" && request.method === "POST") {
+      return json({ code: await dir.resetSigninCode(u.id) }, 200);
+    }
     if (p === "/api/me/invites/dismiss" && request.method === "POST") {
       await dir.dropInvite(u.id, String((await body()).code || ""));
       return json({ ok: true }, 200);
     }
     if (p === "/api/friends/add" && request.method === "POST") {
       const b = await body();
+      if (b.code) {
+        const r = await dir.addFriendByCode(u.id, b.code);
+        if (r.error) return json(r, r.error === "too_many" ? 429 : 400);
+        return json({ status: r.status === "friends" ? "friends" : "requested" }, 200);
+      }
       const email = cleanEmail(b.email);
       if (!email) return json({ error: "bad_email" }, 400);
       const r = await dir.addFriend(u.id, email);

@@ -169,6 +169,29 @@
       </div>
       <p class="note" id="signin-inapp" hidden>Google and Facebook sign-in only work in a phone or computer browser. Use the QR code above or an email code here.</p>
 
+      <div class="code-signin" id="code-signin" hidden>
+        <form id="code-signin-form" class="email-form" autocomplete="on">
+          <input type="text" name="username" id="code-username" autocomplete="username" class="visually-hidden" tabindex="-1" aria-hidden="true">
+          <label for="signin-boxxcode" class="label">Have a Boxxie code? Sign in</label>
+          <div class="pw-wrap">
+            <input id="signin-boxxcode" name="password" type="password" autocomplete="current-password" autocapitalize="characters" spellcheck="false" placeholder="BOXX-XXXX-XXXX-XXXX" maxlength="24">
+            <button type="button" class="pw-show" id="boxxcode-show" aria-pressed="false" aria-label="Show code">Show</button>
+          </div>
+          <div class="field" id="code-otp-row" hidden>
+            <label for="signin-otp" class="label">Number from your authenticator app</label>
+            <input id="signin-otp" class="code-input otp" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="123456">
+          </div>
+          <button class="primary big" type="submit" id="code-signin-btn">Sign in</button>
+        </form>
+        <div class="or"><span>new here?</span></div>
+        <form id="code-create-form" class="email-form" autocomplete="on">
+          <label for="new-name" class="label">Your name</label>
+          <input id="new-name" maxlength="40" autocomplete="nickname" placeholder="What friends call you">
+          <button class="big" type="submit" id="new-create">Create my account</button>
+          <p class="note">No email or password needed. You'll get your own Boxxie code to sign in with.</p>
+        </form>
+      </div>
+
       <div class="or" id="signin-or"><span>or</span></div>
 
       <form id="email-form" class="email-form" autocomplete="on">
@@ -186,6 +209,26 @@
       <p class="error" id="signin-error" role="alert" hidden></p>
       <p class="note">By signing in you agree to the <a href="terms.html" target="_blank" rel="noopener">Terms of use</a>, including zero tolerance for abusive or illegal content, and the <a href="privacy.html" target="_blank" rel="noopener">Privacy policy</a>.</p>
     </div>
+  </section>
+
+  <!-- ============ Your new Boxxie code ============ -->
+  <section class="screen waiting" id="screen-newcode" data-screen="newcode" hidden>
+    <form class="signin-box newcode-box" id="newcode-form" autocomplete="on">
+      <h1 class="wordmark"><img src="icons/boxxie-logo.png" alt="boxxie" width="405" height="160"><span class="share">share</span></h1>
+      <h2>Your Boxxie code</h2>
+      <p class="muted">Use it to sign in on your other phones, tablets and computers. Keep it private, like a password.</p>
+      <input type="text" name="username" id="newcode-user" autocomplete="username" class="visually-hidden" tabindex="-1" aria-hidden="true">
+      <label class="visually-hidden" for="newcode-value">Your Boxxie code</label>
+      <input id="newcode-value" name="password" type="text" autocomplete="new-password" readonly class="code-input newcode">
+      <div class="row center">
+        <button type="button" class="small" id="newcode-copy"><svg><use href="#i-link"/></svg><span>Copy</span></button>
+      </div>
+      <ul class="join-points newcode-points">
+        <li><svg><use href="#i-lock"/></svg><span>When your phone or browser offers to save a password, say yes. It fills the code in for you next time.</span></li>
+        <li><svg><use href="#i-phone"/></svg><span>Or write it down. TVs sign in by scanning a QR code with this device instead.</span></li>
+      </ul>
+      <button class="primary big" type="submit" id="newcode-done">I've saved it</button>
+    </form>
   </section>
 
   <!-- ============ Approve a TV sign-in (on a phone) ============ -->
@@ -210,10 +253,17 @@
     </header>
     <div class="friends-grid">
       <div class="card">
+        <h3>Your friend code</h3>
+        <div class="friend-code-row">
+          <span class="friend-code" id="my-friend-code">…</span>
+          <button class="small" id="friend-code-copy" type="button">Copy</button>
+          <button class="small" id="friend-code-share" type="button" hidden>Share</button>
+        </div>
+        <p class="note">Give this to friends so they can add you. It can't be used to sign in.</p>
         <h3>Add a friend</h3>
-        <p class="muted">Type the email they sign in with. If they don't have Boxxie Share yet, they'll get an invitation.</p>
+        <p class="muted">Type their friend code (or the email they sign in with).</p>
         <form id="friend-add-form" class="row-form" autocomplete="off">
-          <input id="friend-email" type="email" inputmode="email" placeholder="friend@example.com" aria-label="Friend's email">
+          <input id="friend-email" type="text" autocapitalize="characters" spellcheck="false" placeholder="Friend code, like K7FQ-2MXP" aria-label="Friend's code or email">
           <button class="primary" type="submit">Add</button>
         </form>
         <p class="note" id="friend-add-msg" role="status"></p>
@@ -225,6 +275,33 @@
         <h3>Your account</h3>
         <p class="note">Signed in as <span id="me-email"></span>. <a href="terms.html" target="_blank" rel="noopener">Terms</a> · <a href="privacy.html" target="_blank" rel="noopener">Privacy</a></p>
         <button class="small" id="report-problem">Report a problem or abuse</button>
+        <h3>Signing in</h3>
+        <div class="security-rows">
+          <div class="sec-row">
+            <div><strong>Boxxie code</strong><span class="note">Lost it, or think someone saw it? Get a new one; the old one stops working.</span></div>
+            <button class="small" id="code-reset" type="button">New code</button>
+          </div>
+          <div class="sec-row">
+            <div><strong>Authenticator app</strong><span class="note" id="totp-status">Add Google Authenticator as an extra lock.</span></div>
+            <button class="small" id="totp-toggle" type="button">Set up</button>
+          </div>
+        </div>
+        <div class="totp-panel" id="totp-panel" hidden>
+          <div class="totp-setup" id="totp-setup-box">
+            <div class="pair-qr" id="totp-qr" aria-hidden="true"></div>
+            <div class="pair-text">
+              <p><strong>1.</strong> Open Google Authenticator (or any authenticator app), tap <strong>+</strong>, then <strong>Scan a QR code</strong>.</p>
+              <p class="note">Can't scan? Choose "Enter a setup key" and type: <span class="totp-secret" id="totp-secret"></span></p>
+              <p><strong>2.</strong> Type the 6-digit number it shows:</p>
+            </div>
+          </div>
+          <p class="note" id="totp-off-text" hidden>To switch it off, type the 6-digit number from your authenticator app:</p>
+          <form id="totp-form" class="row-form" autocomplete="off">
+            <input id="totp-code" class="otp" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="123456" aria-label="6-digit number">
+            <button class="primary" type="submit" id="totp-submit">Turn on</button>
+          </form>
+          <p class="note" id="totp-msg" role="status"></p>
+        </div>
         <button class="small deny" id="delete-account">Delete my account</button>
       </div>
       <div class="card">
@@ -234,7 +311,7 @@
         </div>
         <h3>Your friends</h3>
         <ul class="friend-list" id="friend-list"></ul>
-        <p class="muted" id="friends-empty">No friends yet. Add someone by email.</p>
+        <p class="muted" id="friends-empty">No friends yet. Add someone with their friend code.</p>
         <div id="friend-sent-wrap" hidden>
           <h3>Waiting for them to accept</h3>
           <ul class="friend-list" id="friend-sent"></ul>

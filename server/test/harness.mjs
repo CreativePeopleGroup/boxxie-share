@@ -581,6 +581,56 @@ ok(codes.size > 1900 && [...codes].every((c) => !/[01OIL]/.test(c)), `codes are 
   const sphone = await connect(`/api/rooms/${room.code}/ws?role=companion&pin=${spin}`, {}, "Sarah");
   ok((await sphone.next(type("approved"))).companion === true, "your own phone pairs fine");
 
+  // Boxxie codes: sign in with your own code, no email
+  const prv = await (await call("/auth/providers", { headers: { Authorization: null } })).json();
+  ok(prv.code === true, "Boxxie code sign-in is on by default");
+  const noName = await post("/auth/code/create", { name: "" }, null, "198.51.100.120");
+  ok(noName.status === 400, "a new account needs a name");
+  const acc = await (await post("/auth/code/create", { name: "Priya" }, null, "198.51.100.121")).json();
+  ok(/^BOXX(-[B-DF-HJ-NP-TV-XZ2-9]{4}){3}$/.test(acc.code) && acc.token && acc.user.name === "Priya", `new account gets its own sign-in code (${acc.code})`);
+  const accMe = await (await call("/api/me", { headers: { Authorization: "Bearer " + acc.token } })).json();
+  ok(/^[B-DF-HJ-NP-TV-XZ2-9]{8}$/.test(accMe.user.friendCode) && accMe.user.hasCode, "and a friend code to share");
+  const cBack = await (await post("/auth/code/signin", { code: acc.code.toLowerCase().replace(/-/g, " ") }, null, "198.51.100.122")).json();
+  ok(cBack.token && cBack.user.id === acc.user.id, "signing in with the code works on another device (spaces and lower case are fine)");
+  const wrongc = await post("/auth/code/signin", { code: "BOXX-BBBB-CCCC-DDDD" }, null, "198.51.100.123");
+  ok(wrongc.status === 400, "a wrong code is refused");
+  for (let i = 0; i < 8; i++) await post("/auth/code/signin", { code: "BOXX-BBBB-CCCC-DDD" + "FGHJKLMN"[i] }, null, "198.51.100.124");
+  const flood = await post("/auth/code/signin", { code: acc.code }, null, "198.51.100.124");
+  ok(flood.status === 429, "guessing codes gets blocked after a few tries");
+  const newCode = (await (await post("/api/me/code/reset", {}, acc.token)).json()).code;
+  const oldTry = await post("/auth/code/signin", { code: acc.code }, null, "198.51.100.125");
+  const newTry = await (await post("/auth/code/signin", { code: newCode }, null, "198.51.100.125")).json();
+  ok(oldTry.status === 400 && newTry.token, "getting a new code stops the old one working");
+  const acc2 = await (await post("/auth/code/create", { name: "Omar" }, null, "198.51.100.126")).json();
+  const fadd = await (await post("/api/friends/add", { code: accMe.user.friendCode.toLowerCase() }, acc2.token)).json();
+  const pMe = await (await call("/api/me", { headers: { Authorization: "Bearer " + acc.token } })).json();
+  ok(fadd.status === "requested" && pMe.friends.some((f) => f.name === "Omar" && f.status === "incoming"), "friends add each other by friend code");
+  const badF = await post("/api/friends/add", { code: "ZZZZZZZZ" }, acc2.token);
+  ok(badF.status === 400, "an unknown friend code says so");
+  for (let i = 0; i < 5; i++) await post("/auth/code/create", { name: "Spam" + i }, null, "198.51.100.127");
+  const tooMany = await post("/auth/code/create", { name: "Spam6" }, null, "198.51.100.127");
+  ok(tooMany.status === 429, "one connection can't make lots of accounts");
+
+  // Authenticator app (Google Authenticator) as an extra lock
+  const { totpAt: tAt } = await import("../src/accounts.js");
+  const setup = await (await post("/api/me/totp/setup", {}, acc2.token)).json();
+  ok(/^otpauth:\/\/totp\/Boxxie%20Share/.test(setup.uri) && setup.secret.length >= 32, "Boxxie Share gives a QR code for Google Authenticator");
+  const step = Math.floor(Date.now() / 30000);
+  const badConfirm = await post("/api/me/totp/confirm", { code: "000000" === (await tAt(setup.secret, step)) ? "111111" : "000000" }, acc2.token);
+  ok(badConfirm.status === 400, "the wrong number doesn't switch it on");
+  const conf = await post("/api/me/totp/confirm", { code: await tAt(setup.secret, step - 1) }, acc2.token);
+  ok(conf.status === 200, "the number from the app switches the extra lock on");
+  const o1 = await (await post("/auth/code/signin", { code: acc2.code }, null, "198.51.100.130")).json();
+  ok(o1.needOtp === true && !o1.token, "with the lock on, the Boxxie code alone isn't enough");
+  const o2 = await post("/auth/code/signin", { code: acc2.code, otp: "123456" === (await tAt(setup.secret, step)) ? "654321" : "123456" }, null, "198.51.100.131");
+  ok(o2.status === 400, "a wrong authenticator number is refused");
+  const o3 = await (await post("/auth/code/signin", { code: acc2.code, otp: await tAt(setup.secret, step) }, null, "198.51.100.132")).json();
+  ok(!!o3.token, "Boxxie code plus the authenticator number signs in");
+  const o4 = await post("/auth/code/signin", { code: acc2.code, otp: await tAt(setup.secret, step) }, null, "198.51.100.133");
+  ok(o4.status === 400, "the same authenticator number can't be used twice");
+  const acc2Me = await (await call("/api/me", { headers: { Authorization: "Bearer " + acc2.token } })).json();
+  ok(acc2Me.user.totp === true, "the account shows the extra lock is on");
+
   // App review account: fixed code, no email sent
   env.REVIEW_EMAIL = "review@example.com";
   env.REVIEW_CODE = "246810";
