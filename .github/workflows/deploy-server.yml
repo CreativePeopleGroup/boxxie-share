@@ -73,7 +73,7 @@ jobs:
           # CONTACT_EMAIL (repository variable) also receives abuse reports, unless REPORT_EMAIL is set.
           if ! npx --yes wrangler@4 deploy --var "ALLOWED_ORIGINS:$ORIGIN" $EXTRA 2>&1 | tee deploy.log; then
             # Show the reason on the run page, not only in the raw log.
-            grep -E "ERROR|✘|error|Error" deploy.log | head -20 | sed 's/^/::error::/'
+            sed 's/\x1b\[[0-9;]*m//g' deploy.log | grep -v '^\s*$' | grep -A8 -E "ERROR|✘" | head -40 | sed 's/^/::error::/'
             exit 1
           fi
           URL="$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' deploy.log | head -1)"
