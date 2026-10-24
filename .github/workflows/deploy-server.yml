@@ -119,23 +119,29 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           HAVE_TURN_SECRET: ${{ secrets.TURN_KEY_ID != '' }}
+          URL: ${{ steps.deploy.outputs.deployment-url }}
         run: |
           export CLOUDFLARE_API_TOKEN="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | tr -d '[:space:]')"
           export CLOUDFLARE_ACCOUNT_ID="$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID" | tr -d '[:space:]')"
           if [ "$HAVE_TURN_SECRET" = "true" ]; then echo "::notice::Relay: using the TURN_KEY_* secrets"; exit 0; fi
-          if npx --yes wrangler@4 secret list 2>/dev/null | grep -q '"TURN_KEY_ID"'; then
-            echo "::notice::Relay: already switched on"; exit 0
-          fi
+          sleep 5
+          STATE="$(curl -s "$URL/health/relay" | jq -r '.cloudflare // "unknown"')"
+          if [ "$STATE" = "ok" ]; then echo "::notice::Relay: Cloudflare relay working"; exit 0; fi
+          echo "Cloudflare relay state: $STATE. Creating a fresh TURN key."
           R="$(curl -s -X POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" \
             --data '{"name":"boxxie-share"}' \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/calls/turn_keys")"
           if [ "$(echo "$R" | jq -r '.success')" != "true" ]; then
-            echo "::warning::Relay not switched on: Cloudflare said $(echo "$R" | jq -c '.errors'). The Cloudflare token needs the 'Calls: Edit' (Realtime) permission. Friends on the same Wi-Fi still connect without it."
+            echo "::warning::Relay not switched on: Cloudflare said $(echo "$R" | jq -c '.errors'). The Cloudflare token needs the 'Calls: Edit' (Realtime) permission."
             exit 0
           fi
-          echo "$R" | jq -r '.result.uid' | npx --yes wrangler@4 secret put TURN_KEY_ID > /dev/null
-          echo "$R" | jq -r '.result.key' | npx --yes wrangler@4 secret put TURN_KEY_API_TOKEN > /dev/null
-          echo "::notice::Relay: switched on (Cloudflare TURN key created)"
+          KID="$(echo "$R" | jq -r '.result.uid // empty')"; KEY="$(echo "$R" | jq -r '.result.key // empty')"
+          if [ -z "$KID" ] || [ -z "$KEY" ]; then echo "::warning::Relay: unexpected reply fields $(echo "$R" | jq -c '.result | keys')"; exit 0; fi
+          # printf, not echo: no stray line break on the end of the key
+          printf '%s' "$KID" | npx --yes wrangler@4 secret put TURN_KEY_ID > /dev/null
+          printf '%s' "$KEY" | npx --yes wrangler@4 secret put TURN_KEY_API_TOKEN > /dev/null
+          echo "::notice::Relay: fresh Cloudflare TURN key saved"
+          sleep 10
 
       - name: Check the relay
         env:
