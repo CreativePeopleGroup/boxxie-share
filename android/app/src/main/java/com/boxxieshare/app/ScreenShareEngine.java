@@ -312,6 +312,12 @@ public final class ScreenShareEngine {
         int frame = buffer.capacity();
         try {
             if (sharing && Build.VERSION.SDK_INT >= 29 && playbackConfig != null) {
+                if (app.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    audioState = "no-permission";
+                    zero(buffer, frame);
+                    pace();
+                    return;
+                }
                 if (playbackRecord == null || playbackRate != sampleRate || playbackChannels != channelCount) {
                     releasePlayback();
                     int mask = channelCount == 2 ? AudioFormat.CHANNEL_IN_STEREO : AudioFormat.CHANNEL_IN_MONO;
@@ -340,7 +346,10 @@ public final class ScreenShareEngine {
                     System.arraycopy(readScratch, 0, ring, ringFill, n);
                     ringFill += n;
                 }
-                if (n > 0 && !isSilent(readScratch, n)) soundSeenNs = System.nanoTime();
+                long t = System.nanoTime();
+                if (n > 0) bytesSeenNs = t;
+                if (n > 0 && !isSilent(readScratch, n)) soundSeenNs = t;
+                audioState = t - soundSeenNs < 5_000_000_000L ? "ok" : t - bytesSeenNs < 5_000_000_000L ? "silent" : "nodata";
                 if (ringFill >= frame) {
                     buffer.clear();
                     buffer.put(ring, 0, frame);
@@ -355,12 +364,18 @@ public final class ScreenShareEngine {
                 zero(buffer, frame);
             }
         } catch (Throwable t) {
+            audioState = "error";
+            Log.w(TAG, "playback capture", t);
+            releasePlayback();
             zero(buffer, frame);
         }
         pace();
     }
 
     private volatile long soundSeenNs;
+    // What happened to the TV's sound: ok | silent | nodata | no-permission | error | none
+    private volatile String audioState = "none";
+    private volatile long bytesSeenNs;
 
     private static boolean isSilent(byte[] b, int n) {
         for (int i = 0; i + 1 < n; i += 64) {
@@ -501,7 +516,8 @@ public final class ScreenShareEngine {
             emit(event("viewer-stats").put("peer", id).put("ice", v.ice).put("frames", frames)
                     .put("bytes", bytes).put("codec", codec).put("encoder", encoder).put("vp8", v.vp8)
                     .put("sound", System.nanoTime() - soundSeenNs < 5_000_000_000L)
-                    .put("fps", Math.round(fps)).put("limit", limit).put("audioBytes", audioBytes));
+                    .put("fps", Math.round(fps)).put("limit", limit).put("audioBytes", audioBytes)
+                    .put("audioState", audioState));
         } catch (Exception ignored) {}
         // Connected for ~6 seconds and the H.264 encoder hasn't made a single frame: use VP8 instead.
         if (!v.vp8 && v.noPictureChecks >= 2) {

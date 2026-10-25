@@ -1079,6 +1079,7 @@
         h.audioBytes = ev.audioBytes;
       }
       h.fps = ev.fps;
+      h.audioState = ev.audioState;
       h.limit = ev.limit;
     }
     health.set(ev.peer, h);
@@ -1103,7 +1104,14 @@
         li.className = "bad";
       } else if ((ice === "connected" || ice === "completed") && h.frames > 0) {
         const busy = h.limit === "cpu" ? " (TV busy)" : h.limit === "bandwidth" ? " (slow internet)" : "";
-        const snd = h.sound === undefined ? "" : !h.sound ? " · no sound playing" : h.soundSending === false ? " · sound not sending" : " and sound";
+        const why = {
+          "no-permission": " · no sound: Boxxie isn't allowed to record sound",
+          error: " · no sound: recording didn't start",
+          silent: " · no sound reaching Boxxie (app blocks it, or Dolby is on)",
+          nodata: " · no sound reaching Boxxie (app blocks it, or Dolby is on)",
+          none: " · no sound",
+        }[h.audioState];
+        const snd = h.sound === undefined ? "" : !h.sound ? why || " · no sound playing" : h.soundSending === false ? " · sound not sending" : " and sound";
         text = `getting the picture${snd} · ${h.codec || "video"}${h.fps ? ` · ${h.fps} fps${busy}` : ""}`;
         li.className = "ok";
       } else if (ice === "connected" || ice === "completed") {
@@ -1485,10 +1493,10 @@
       // Friends and paired phones: a locked screen or a signal drop isn't goodbye. Keep coming back.
       if (S.role === "viewer" && (opened || S.rejoinSince) && ev.code !== 4004 && ev.code !== 4003) return rejoinSoon();
       if (!opened) return failConnect("network");
-      if (S.role === "host" && ev.code !== 4004 && ev.code !== 4000 && S.reconnectTries < 8) {
+      if (S.role === "host" && ev.code !== 4004 && ev.code !== 4000 && (S.reconnectTries < 8 || S.nativeSharing)) {
         S.reconnectTries++;
         banner("Connection dropped. Reconnecting…");
-        setTimeout(() => S.ws === ws && connect(), Math.min(1000 * 2 ** S.reconnectTries, 15000));
+        setTimeout(() => S.ws === ws && connect(), Math.min(1000 * 2 ** S.reconnectTries, S.nativeSharing ? 5000 : 15000));
         return;
       }
       if (ev.code === 4004 || ev.code === 4003) return; // handled by room-closed / denied
