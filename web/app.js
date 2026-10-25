@@ -1165,30 +1165,10 @@
     closeApps();
     $("ctl-reshare").focus();
   };
-  // Remote arrows: move tile by tile, scrolling the list so every app can be reached
-  $("apps-grid").addEventListener("keydown", (e) => {
-    const keys = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: "up", ArrowDown: "down" };
-    if (!(e.key in keys)) return;
-    const tiles = [...$("apps-grid").querySelectorAll(".app-tile")];
-    const i = tiles.indexOf(document.activeElement);
-    if (i < 0) return;
-    const cols = Math.max(1, tiles.filter((t) => t.offsetTop === tiles[0].offsetTop).length);
-    let j = i;
-    if (keys[e.key] === "up") j = i - cols;
-    else if (keys[e.key] === "down") j = Math.min(tiles.length - 1, i + cols);
-    else j = i + keys[e.key];
-    e.preventDefault();
-    if (j < 0) return $("apps-close").focus();
-    if (j >= tiles.length) return;
-    tiles[j].focus();
-    tiles[j].scrollIntoView({ block: "nearest" });
-  });
-  $("apps-close").addEventListener("keydown", (e) => {
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      const t = $("apps-grid").querySelector(".app-tile");
-      if (t) t.focus();
-    }
+  // The remote moves through the list by itself (the buttons behind it are switched off while
+  // it's open); keep whichever app is selected scrolled into view.
+  $("apps-grid").addEventListener("focusin", (e) => {
+    if (e.target.classList.contains("app-tile")) e.target.scrollIntoView({ block: "nearest" });
   });
 
   // ----- TV app: if Android restarts Boxxie's page while you're sharing, go straight back in -----
@@ -2791,8 +2771,10 @@
     return a && ((a.tagName === "INPUT" && !["range", "file", "button"].includes(a.type)) || a.tagName === "TEXTAREA");
   }
   function focusables() {
-    return [...document.querySelectorAll("button, input, select, .file-pick, [tabindex='0']")].filter((el) => {
-      if (el.disabled || el.classList.contains("visually-hidden")) return false;
+    // An open app list keeps the remote inside it; switched-off (inert) parts are skipped.
+    const scope = !$("apps-panel").hidden ? $("apps-panel") : document;
+    return [...scope.querySelectorAll("button, input, select, .file-pick, [tabindex='0']")].filter((el) => {
+      if (el.disabled || el.classList.contains("visually-hidden") || el.closest("[inert]")) return false;
       const r = el.getBoundingClientRect();
       return r.width > 0 && r.height > 0 && !el.closest("[hidden]");
     });
@@ -2800,7 +2782,7 @@
   document.addEventListener("keydown", (e) => {
     const dirs = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] };
     const d = dirs[e.key];
-    if (!d) return;
+    if (!d || e.defaultPrevented) return;
     const a = document.activeElement;
     // Let text boxes and sliders keep left/right for themselves.
     if (a && (isTyping() || a.type === "range") && d[0] !== 0) return;

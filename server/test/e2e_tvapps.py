@@ -52,7 +52,6 @@ with sync_playwright() as p:
     tap(tv, "#ctl-reshare")
     tv.wait_for_selector("#apps-panel:not([hidden])", timeout=5000)
     for _ in range(12): tv.keyboard.press("ArrowDown")
-    for _ in range(8): tv.keyboard.press("ArrowRight")
     focused = tv.evaluate("document.activeElement && document.activeElement.textContent")
     check("The Stream Team" in (focused or ""), f"the remote reaches the last app in a long list (focused: {focused})")
     check(tv.evaluate("(() => { const r = document.activeElement.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; })()"), "and scrolls it into view")
