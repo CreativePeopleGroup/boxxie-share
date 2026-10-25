@@ -307,9 +307,38 @@ public final class ScreenShareEngine {
     private int ringFill;
     private byte[] readScratch = new byte[0];
 
+    // "Test sound": a short beep sent to friends instead of the TV's sound (checks the sound path)
+    private volatile long toneUntilNs;
+    private double tonePhase;
+
+    public void testTone() {
+        toneUntilNs = System.nanoTime() + 3_000_000_000L;
+    }
+
+    private void fillTone(ByteBuffer buffer, int frame, int channelCount, int sampleRate) {
+        int samples = frame / 2 / Math.max(1, channelCount);
+        double step = 2 * Math.PI * 440.0 / sampleRate;
+        for (int i = 0; i < samples; i++) {
+            short v = (short) (Math.sin(tonePhase) * 9000);
+            tonePhase += step;
+            for (int c = 0; c < channelCount; c++) {
+                int at = (i * channelCount + c) * 2;
+                buffer.put(at, (byte) (v & 0xff));
+                buffer.put(at + 1, (byte) ((v >> 8) & 0xff));
+            }
+        }
+    }
+
     @SuppressLint("MissingPermission")
     private void fillWithPlayback(ByteBuffer buffer, int channelCount, int sampleRate, int bytesRead) {
         int frame = buffer.capacity();
+        callbacks++;
+        lastFormat = sampleRate + "Hz x" + channelCount;
+        if (System.nanoTime() < toneUntilNs) {
+            fillTone(buffer, frame, channelCount, sampleRate);
+            pace();
+            return;
+        }
         try {
             if (sharing && Build.VERSION.SDK_INT >= 29 && playbackConfig != null) {
                 if (app.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
@@ -373,6 +402,8 @@ public final class ScreenShareEngine {
     }
 
     private volatile long soundSeenNs;
+    private volatile long callbacks;          // how many 10 ms sound frames WebRTC has asked for
+    private volatile String lastFormat = "";
     // What happened to the TV's sound: ok | silent | nodata | no-permission | error | none
     private volatile String audioState = "none";
     private volatile long bytesSeenNs;
@@ -517,7 +548,7 @@ public final class ScreenShareEngine {
                     .put("bytes", bytes).put("codec", codec).put("encoder", encoder).put("vp8", v.vp8)
                     .put("sound", System.nanoTime() - soundSeenNs < 5_000_000_000L)
                     .put("fps", Math.round(fps)).put("limit", limit).put("audioBytes", audioBytes)
-                    .put("audioState", audioState));
+                    .put("audioState", audioState).put("audioFrames", callbacks).put("audioFormat", lastFormat));
         } catch (Exception ignored) {}
         // Connected for ~6 seconds and the H.264 encoder hasn't made a single frame: use VP8 instead.
         if (!v.vp8 && v.noPictureChecks >= 2) {

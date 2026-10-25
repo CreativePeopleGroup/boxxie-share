@@ -51,6 +51,11 @@ with sync_playwright() as p:
     check(wait(lambda: "Dev" not in tv.inner_text("#viewer-health"), 8), "and off the TV's list")
 
     sarah = friends["Sarah"]
+    check(tv.is_visible("#test-sound"), "the TV has a test-beep button while someone's watching")
+    tv.click("#test-sound")
+    check(wait(lambda: "beep" in tv.evaluate("window.__nativeCalls"), 3), "it asks the app to send a beep")
+    check(wait(lambda: sarah.is_visible("#screen-diag") and "Sound is arriving" in sarah.inner_text("#screen-diag"), 8), "and the friend sees their sound meter")
+    sarah.screenshot(path=f"{OUT}/tvend-2-meter.png")
     sarah.click("#ask-pause")
     check(wait(lambda: "key:pause" in tv.evaluate("window.__nativeCalls"), 5), "a friend pressing pause pauses the app on the TV")
     check(wait(lambda: "Sarah pressed pause" in tv.inner_text("body") or "pressed pause" in sarah.inner_text("#side"), 5), "everyone's told who paused")

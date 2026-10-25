@@ -803,3 +803,6 @@ textarea:focus { border-color: rgba(239, 203, 153, 0.6); outline: none; }
 .join-card .join-addr { word-break: normal; overflow-wrap: normal; white-space: nowrap; font-size: 1rem; }
 .join-card { max-width: none; }
 .screen-diag.corner { top: auto; bottom: 12px; transform: translateX(-50%); font-size: 0.82rem; padding: 10px 14px; }
+.health-col { display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
+.health-col #test-sound { align-self: flex-start; }
+.health-col .note { margin: 0; max-width: 400px; font-size: 0.8rem; color: var(--muted); }

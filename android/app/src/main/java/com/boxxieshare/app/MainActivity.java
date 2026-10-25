@@ -636,6 +636,12 @@ public class MainActivity extends Activity {
             return updater.info();
         }
 
+        /** Send friends a 3-second beep instead of the TV's sound, to check the sound gets through. */
+        @JavascriptInterface
+        public void testSound() {
+            if (ourPage && engine != null) engine.testTone();
+        }
+
         /** Play/pause whatever app is playing on the TV (Hot Player etc.), like the remote's ⏯ key. */
         @JavascriptInterface
         public void mediaKey(String action) {

@@ -1080,6 +1080,8 @@
       }
       h.fps = ev.fps;
       h.audioState = ev.audioState;
+      h.audioFrames = ev.audioFrames;
+      h.audioFormat = ev.audioFormat;
       h.limit = ev.limit;
     }
     health.set(ev.peer, h);
@@ -1133,7 +1135,18 @@
       list.append(li);
     }
     list.hidden = !list.children.length;
+    // Sound check tools (only while someone's watching)
+    const anyone = !list.hidden;
+    $("test-sound").hidden = !(anyone && typeof NATIVE.testSound === "function");
+    const first = [...health.values()].find((x) => x.audioFrames !== undefined);
+    $("sound-detail").hidden = !(anyone && first);
+    if (first) $("sound-detail").textContent = `Sound engine: ${first.audioState || "?"} · ${first.audioFrames} frames · ${first.audioFormat || "?"} · sent ${Math.round((first.audioBytes || 0) / 1024)} KB`;
   }
+  $("test-sound").onclick = () => {
+    try { NATIVE.testSound(); } catch {}
+    toast("Sending a 3-second beep. Ask your friend if they heard it.", 5000);
+    send({ type: "chat", text: "🔔 Test beep sent: can you hear it?" });
+  };
 
   // ----- TV app: choose one of the TV's apps to open while sharing -----
   let appsCache = null;
@@ -1293,7 +1306,14 @@
           frames += r.framesDecoded || 0;
           bytes += r.bytesReceived || 0;
         }
-        if (r.type === "inbound-rtp" && r.kind === "audio") audioBytes += r.bytesReceived || 0;
+        if (r.type === "inbound-rtp" && r.kind === "audio") {
+          audioBytes += r.bytesReceived || 0;
+          if (typeof r.audioLevel === "number") sp.level = r.audioLevel;
+          if (typeof r.totalAudioEnergy === "number") {
+            sp.energyRise = r.totalAudioEnergy - (sp.energy || 0);
+            sp.energy = r.totalAudioEnergy;
+          }
+        }
         if (r.type === "local-candidate") mine.add(r.candidateType);
         if (r.type === "remote-candidate") theirs.add(r.candidateType);
       });
@@ -1314,6 +1334,9 @@
         el.replaceChildren(document.createTextNode("The TV's picture has paused. Waiting for it to come back…"));
       } else if (noSound) {
         el.replaceChildren(document.createTextNode("Picture's here, but no sound is arriving from the TV yet."));
+      } else if (sp.showDetails) {
+        const loud = (sp.level || 0) > 0.01 || (sp.energyRise || 0) > 0.0005;
+        el.replaceChildren(document.createTextNode(loud ? "Sound is arriving from the TV 🔊" : "Sound is arriving, but it's silent 🔇"));
       } else {
         el.hidden = true;
         // Sound is arriving: make sure it isn't muted here
@@ -1321,7 +1344,7 @@
         return;
       }
       const small = document.createElement("small");
-      small.textContent = `Network: ${ice} · sound received ${Math.round(audioBytes / 1024)} KB · picture ${frames} frames`;
+      small.textContent = `Network: ${ice} · sound received ${Math.round(audioBytes / 1024)} KB · level ${(sp.level || 0).toFixed(3)} · ${filmVideo.muted ? "muted here" : "not muted"} · picture ${frames} frames`;
       el.append(small);
       el.hidden = false;
       return;
@@ -1338,6 +1361,10 @@
     el.append(small);
     el.hidden = false;
   }
+  // Friends: tap "Live from the host" to see connection and sound details
+  $("viewer-status").addEventListener("click", () => {
+    for (const sp of screenPeers.values()) sp.showDetails = !sp.showDetails;
+  });
   function closeScreenPeer(from) {
     const sp = screenPeers.get(from);
     if (!sp) return;
@@ -1634,6 +1661,11 @@
         return;
       case "chat":
         addChat(m);
+        // The host sent a test beep: show this friend's sound meter for 20 seconds
+        if (S.role === "viewer" && m.host && /Test beep sent/.test(m.text || "")) {
+          for (const sp of screenPeers.values()) sp.showDetails = true;
+          setTimeout(() => { for (const sp of screenPeers.values()) sp.showDetails = false; }, 20000);
+        }
         return;
       case "remote":
         applyRemote(m.action, m.by);
