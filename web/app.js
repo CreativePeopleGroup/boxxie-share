@@ -1074,6 +1074,8 @@
       h.encoder = ev.encoder || h.encoder;
       h.vp8 = ev.vp8;
       if (ev.sound !== undefined) h.sound = ev.sound;
+      h.fps = ev.fps;
+      h.limit = ev.limit;
     }
     health.set(ev.peer, h);
     renderHealth();
@@ -1096,7 +1098,8 @@
         text = "can't connect (network)";
         li.className = "bad";
       } else if ((ice === "connected" || ice === "completed") && h.frames > 0) {
-        text = `getting the picture${h.sound === undefined ? "" : h.sound ? " and sound" : " · no sound yet"} · ${h.codec || "video"}`;
+        const busy = h.limit === "cpu" ? " (TV busy)" : h.limit === "bandwidth" ? " (slow internet)" : "";
+        text = `getting the picture${h.sound === undefined ? "" : h.sound ? " and sound" : " · no sound yet"} · ${h.codec || "video"}${h.fps ? ` · ${h.fps} fps${busy}` : ""}`;
         li.className = "ok";
       } else if (ice === "connected" || ice === "completed") {
         text = h.vp8 ? "connected, trying another video format…" : "connected, starting the picture…";
@@ -1269,7 +1272,7 @@
   const screenPeers = new Map();
   async function screenDiag(sp) {
     if (screenPeers.get(sp.from) !== sp) return;
-    let frames = 0, bytes = 0;
+    let frames = 0, bytes = 0, audioBytes = 0;
     const mine = new Set(), theirs = new Set();
     try {
       (await sp.pc.getStats()).forEach((r) => {
@@ -1277,16 +1280,39 @@
           frames += r.framesDecoded || 0;
           bytes += r.bytesReceived || 0;
         }
+        if (r.type === "inbound-rtp" && r.kind === "audio") audioBytes += r.bytesReceived || 0;
         if (r.type === "local-candidate") mine.add(r.candidateType);
         if (r.type === "remote-candidate") theirs.add(r.candidateType);
       });
     } catch {}
     const el = $("screen-diag");
+    const ice = sp.pc.iceConnectionState;
+    const now = Date.now();
+    // Picture moving? Sound arriving?
+    if (frames > (sp.lastFrames || 0)) sp.frameAt = now;
+    if (audioBytes > (sp.lastAudio || 0) + 2000) sp.audioAt = now;
+    sp.lastFrames = frames;
+    sp.lastAudio = audioBytes;
+    el.classList.toggle("corner", frames > 0);
     if (frames > 0) {
-      el.hidden = true;
+      const stalled = now - (sp.frameAt || now) > 5000;
+      const noSound = now - (sp.audioAt || sp.started || now) > 8000;
+      if (stalled) {
+        el.replaceChildren(document.createTextNode("The TV's picture has paused. Waiting for it to come back…"));
+      } else if (noSound) {
+        el.replaceChildren(document.createTextNode("Picture's here, but no sound is arriving from the TV yet."));
+      } else {
+        el.hidden = true;
+        // Sound is arriving: make sure it isn't muted here
+        if (filmVideo.muted) $("sound-on").hidden = false;
+        return;
+      }
+      const small = document.createElement("small");
+      small.textContent = `Network: ${ice} · sound received ${Math.round(audioBytes / 1024)} KB · picture ${frames} frames`;
+      el.append(small);
+      el.hidden = false;
       return;
     }
-    const ice = sp.pc.iceConnectionState;
     let msg;
     if (ice === "failed") msg = "Can't reach the TV's picture. Try the same Wi-Fi as the TV, or ask the host to press Stop sharing and share again.";
     else if (ice === "connected" || ice === "completed") msg = bytes > 0 ? "The picture is arriving…" : "Connected to the TV. Waiting for its picture…";
@@ -1325,7 +1351,7 @@
     }
     if (!sp) {
       const pc = new RTCPeerConnection({ iceServers: S.ice, bundlePolicy: "max-bundle" });
-      sp = { pc, session: data.session, pending: [], from };
+      sp = { pc, session: data.session, pending: [], from, started: Date.now() };
       sp.timer = setInterval(() => screenDiag(sp), 2000);
       pc.onicecandidate = (e) => {
         if (e.candidate) send({ type: "signal", to: from, data: { ch: "screen", session: sp.session, candidate: e.candidate.toJSON() } });

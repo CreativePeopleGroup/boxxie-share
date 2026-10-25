@@ -94,6 +94,7 @@ public final class ScreenShareEngine {
 
     private final List<PeerConnection.IceServer> iceServers = new ArrayList<>();
     private int maxBitrate = 8_000_000;
+    private int captureHeight = 1080;
     private int maxHeight = 1080;
     private final Map<String, Viewer> viewers = new HashMap<>();
 
@@ -234,6 +235,7 @@ public final class ScreenShareEngine {
                 videoSource = factory.createVideoSource(false);
                 capturer.initialize(textureHelper, app, videoSource.getCapturerObserver());
                 int[] size = captureSize();
+                captureHeight = Math.min(size[0], size[1]);
                 capturer.startCapture(size[0], size[1], 30);
                 videoTrack = factory.createVideoTrack("screen-video", videoSource);
 
@@ -420,7 +422,7 @@ public final class ScreenShareEngine {
                     new RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY, streams));
             pc.addTransceiver(audioTrack,
                     new RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY, streams));
-            limitBitrate(vt.getSender());
+            limitBitrate(vt.getSender(), vp8);
             pc.createOffer(new SdpAdapter() {
                 @Override
                 public void onCreateSuccess(SessionDescription sdp) {
@@ -463,7 +465,8 @@ public final class ScreenShareEngine {
     private void onStats(String id, Viewer v, RTCStatsReport report) {
         if (viewers.get(id) != v) return;
         long frames = 0, bytes = 0;
-        String encoder = "", codec = "";
+        double fps = 0;
+        String encoder = "", codec = "", limit = "";
         Map<String, RTCStats> all = report.getStatsMap();
         for (RTCStats st : all.values()) {
             if (!"outbound-rtp".equals(st.getType())) continue;
@@ -473,6 +476,10 @@ public final class ScreenShareEngine {
             Object b = m.get("bytesSent");
             if (f instanceof Number) frames += ((Number) f).longValue();
             if (b instanceof Number) bytes += ((Number) b).longValue();
+            Object fr = m.get("framesPerSecond");
+            if (fr instanceof Number) fps = ((Number) fr).doubleValue();
+            Object ql = m.get("qualityLimitationReason");
+            if (ql != null) limit = String.valueOf(ql);
             Object impl = m.get("encoderImplementation");
             if (impl != null) encoder = String.valueOf(impl);
             Object cid = m.get("codecId");
@@ -487,7 +494,8 @@ public final class ScreenShareEngine {
         try {
             emit(event("viewer-stats").put("peer", id).put("ice", v.ice).put("frames", frames)
                     .put("bytes", bytes).put("codec", codec).put("encoder", encoder).put("vp8", v.vp8)
-                    .put("sound", System.nanoTime() - soundSeenNs < 5_000_000_000L));
+                    .put("sound", System.nanoTime() - soundSeenNs < 5_000_000_000L)
+                    .put("fps", Math.round(fps)).put("limit", limit));
         } catch (Exception ignored) {}
         // Connected for ~6 seconds and the H.264 encoder hasn't made a single frame: use VP8 instead.
         if (!v.vp8 && v.noPictureChecks >= 2) {
@@ -496,12 +504,20 @@ public final class ScreenShareEngine {
         }
     }
 
-    private void limitBitrate(RtpSender sender) {
+    private void limitBitrate(RtpSender sender, boolean vp8) {
         try {
             RtpParameters p = sender.getParameters();
             for (RtpParameters.Encoding e : p.encodings) {
-                e.maxBitrateBps = maxBitrate;
-                e.maxFramerate = 30;
+                if (vp8) {
+                    // VP8 is encoded by the TV's processor (no hardware help): 720p at 24 fps keeps
+                    // up on a Fire TV Stick while it's also playing the film.
+                    e.maxBitrateBps = Math.min(maxBitrate, 2_500_000);
+                    e.maxFramerate = 24;
+                    if (captureHeight > 720) e.scaleResolutionDownBy = captureHeight / 720.0;
+                } else {
+                    e.maxBitrateBps = maxBitrate;
+                    e.maxFramerate = 30;
+                }
             }
             sender.setParameters(p);
         } catch (Throwable t) {

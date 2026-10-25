@@ -42,7 +42,7 @@
         if (pc.connectionState === "closed") return clearInterval(tick);
         let frames = 0, bytes = 0;
         (await pc.getStats()).forEach((r) => { if (r.type === "outbound-rtp" && r.kind === "video") { frames += r.framesEncoded || 0; bytes += r.bytesSent || 0; } });
-        emit({ type: "viewer-stats", peer: id, ice: pc.iceConnectionState, frames, bytes, codec: "VP8", encoder: "test", vp8: false });
+        emit({ type: "viewer-stats", peer: id, ice: pc.iceConnectionState, frames, bytes, codec: "VP8", encoder: "test", vp8: false, sound: true, fps: 24, limit: "none" });
       }, 1500);
       await pc.setLocalDescription(await pc.createOffer());
       emit({ type: "signal", peer: id, data: { session, sdp: { type: "offer", sdp: pc.localDescription.sdp } } });

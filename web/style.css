@@ -802,3 +802,4 @@ textarea:focus { border-color: rgba(239, 203, 153, 0.6); outline: none; }
 /* Keep the website address on one line (it used to break as "boxxie / -share") */
 .join-card .join-addr { word-break: normal; overflow-wrap: normal; white-space: nowrap; font-size: 1rem; }
 .join-card { max-width: none; }
+.screen-diag.corner { top: auto; bottom: 12px; transform: translateX(-50%); font-size: 0.82rem; padding: 10px 14px; }
