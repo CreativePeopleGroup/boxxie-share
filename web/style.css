@@ -799,3 +799,6 @@ textarea:focus { border-color: rgba(239, 203, 153, 0.6); outline: none; }
 /* TV: chat pop-ups stay a narrow column at the top left, clear of the middle of the screen */
 .tv .chat-toasts { max-width: 300px; }
 #film[poster] { background: transparent; }
+/* Keep the website address on one line (it used to break as "boxxie / -share") */
+.join-card .join-addr { word-break: normal; overflow-wrap: normal; white-space: nowrap; font-size: 1rem; }
+.join-card { max-width: none; }
