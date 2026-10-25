@@ -468,9 +468,15 @@ public final class ScreenShareEngine {
         double fps = 0;
         String encoder = "", codec = "", limit = "";
         Map<String, RTCStats> all = report.getStatsMap();
+        long audioBytes = 0;
         for (RTCStats st : all.values()) {
             if (!"outbound-rtp".equals(st.getType())) continue;
             Map<String, Object> m = st.getMembers();
+            if ("audio".equals(String.valueOf(m.get("kind")))) {
+                Object ab = m.get("bytesSent");
+                if (ab instanceof Number) audioBytes += ((Number) ab).longValue();
+                continue;
+            }
             if (!"video".equals(String.valueOf(m.get("kind")))) continue;
             Object f = m.get("framesEncoded");
             Object b = m.get("bytesSent");
@@ -495,7 +501,7 @@ public final class ScreenShareEngine {
             emit(event("viewer-stats").put("peer", id).put("ice", v.ice).put("frames", frames)
                     .put("bytes", bytes).put("codec", codec).put("encoder", encoder).put("vp8", v.vp8)
                     .put("sound", System.nanoTime() - soundSeenNs < 5_000_000_000L)
-                    .put("fps", Math.round(fps)).put("limit", limit));
+                    .put("fps", Math.round(fps)).put("limit", limit).put("audioBytes", audioBytes));
         } catch (Exception ignored) {}
         // Connected for ~6 seconds and the H.264 encoder hasn't made a single frame: use VP8 instead.
         if (!v.vp8 && v.noPictureChecks >= 2) {

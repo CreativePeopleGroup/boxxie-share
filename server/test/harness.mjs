@@ -411,11 +411,16 @@ ok(codes.size > 1900 && [...codes].every((c) => !/[01OIL]/.test(c)), `codes are 
   ok((await h.next(type("remote"))).action === "play", "host's paired phone works as the film remote");
   phone.sendJ({ type: "remote", action: "faces:mini" });
   ok((await tv.next(type("remote"))).action === "faces:mini", "Sarah's phone sets the faces on her own TV");
+  // Friends can press play/pause for everyone (named), but nothing else
+  pending.sendJ({ type: "remote", action: "pause" });
+  const fr = await h.next(type("remote"));
+  ok(fr.action === "pause" && fr.by === "Pending", "a friend's pause reaches the host, with their name");
   let strayRemote = false;
-  pending.sendJ({ type: "remote", action: "play" });
+  pending.sendJ({ type: "remote", action: "fwd" });
+  pending.sendJ({ type: "remote", action: "faces:off" });
   phone.sendJ({ type: "remote", action: "rm -rf" });
   try { await h.next(type("remote"), 200); strayRemote = true; } catch {}
-  ok(!strayRemote, "only a paired phone can send remote presses, and only known ones");
+  ok(!strayRemote, "friends can only play/pause; only paired phones send other presses, and only known ones");
 
   const phone2 = await connect(`/api/rooms/${rm.code}/ws?role=companion&pin=${pc.pin}`, H2, "Sarah");
   await phone2.next(type("approved"));

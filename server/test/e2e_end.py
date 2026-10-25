@@ -67,6 +67,10 @@ with sync_playwright() as p:
     check(wait(lambda: "Dev" not in host.inner_text("#people-list"), 10), "and is gone from the host's list")
 
     host.click("#ctl-play")
+    sarah.click("#ask-pause")
+    check(wait(lambda: host.evaluate("document.getElementById('film').paused"), 5), "a friend can pause the film for everyone")
+    sarah.click("#ask-pause")
+    check(wait(lambda: not host.evaluate("document.getElementById('film').paused"), 5), "and play it again")
     check(wait(lambda: card(sarah) and card(host), 20), "when the film ends, everyone sees the end card")
     check("Leave now" in sarah.inner_text("#end-card") and sarah.is_hidden("#end-keep"), "friends can leave now")
     check(host.is_visible("#end-keep") and host.is_visible("#end-now"), "the host can keep the room open or close it")

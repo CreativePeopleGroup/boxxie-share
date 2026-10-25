@@ -636,6 +636,18 @@ public class MainActivity extends Activity {
             return updater.info();
         }
 
+        /** Play/pause whatever app is playing on the TV (Hot Player etc.), like the remote's ⏯ key. */
+        @JavascriptInterface
+        public void mediaKey(String action) {
+            if (!ourPage) return;
+            int code = "pause".equals(action) ? KeyEvent.KEYCODE_MEDIA_PAUSE
+                    : "playonly".equals(action) ? KeyEvent.KEYCODE_MEDIA_PLAY : KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE;
+            android.media.AudioManager am = (android.media.AudioManager) getSystemService(AUDIO_SERVICE);
+            if (am == null) return;
+            am.dispatchMediaKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, code));
+            am.dispatchMediaKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, code));
+        }
+
         /** Is any app playing sound right now? (Used to notice when the film has finished.) */
         @JavascriptInterface
         public boolean mediaPlaying() {

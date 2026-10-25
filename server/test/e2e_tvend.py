@@ -51,6 +51,11 @@ with sync_playwright() as p:
     check(wait(lambda: "Dev" not in tv.inner_text("#viewer-health"), 8), "and off the TV's list")
 
     sarah = friends["Sarah"]
+    sarah.click("#ask-pause")
+    check(wait(lambda: "key:pause" in tv.evaluate("window.__nativeCalls"), 5), "a friend pressing pause pauses the app on the TV")
+    check(wait(lambda: "Sarah pressed pause" in tv.inner_text("body") or "pressed pause" in sarah.inner_text("#side"), 5), "everyone's told who paused")
+    sarah.click("#ask-pause")
+    check(wait(lambda: "key:playonly" in tv.evaluate("window.__nativeCalls"), 5), "and pressing play plays it again")
     tv.evaluate("window.__fakePlaying = false")
     check(wait(lambda: sarah.is_visible("#end-card") and "Nothing's playing" in sarah.inner_text("#end-card"), 15), "when nothing plays for a while, everyone gets the countdown")
     tv.evaluate("window.__fakePlaying = true")

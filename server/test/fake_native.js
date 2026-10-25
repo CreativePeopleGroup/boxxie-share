@@ -62,6 +62,7 @@
       pcs.clear(); clearInterval(timer); if (stream) stream.getTracks().forEach((t) => t.stop()); stream = null;
     },
     goHome: () => window.__nativeCalls.push("home"),
+    mediaKey: (a) => window.__nativeCalls.push("key:" + a),
     mediaPlaying: () => window.__fakePlaying !== false,
     networkInfo: () => JSON.stringify({ vpn: !!window.__fakeVpn, wifi: true, ethernet: false }),
     isSharing: () => !!sessionStorage.getItem("fakeSharing"),

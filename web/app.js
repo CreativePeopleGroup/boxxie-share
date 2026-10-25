@@ -1074,6 +1074,10 @@
       h.encoder = ev.encoder || h.encoder;
       h.vp8 = ev.vp8;
       if (ev.sound !== undefined) h.sound = ev.sound;
+      if (ev.audioBytes !== undefined) {
+        h.soundSending = ev.audioBytes > (h.audioBytes || 0) + 500;
+        h.audioBytes = ev.audioBytes;
+      }
       h.fps = ev.fps;
       h.limit = ev.limit;
     }
@@ -1099,7 +1103,8 @@
         li.className = "bad";
       } else if ((ice === "connected" || ice === "completed") && h.frames > 0) {
         const busy = h.limit === "cpu" ? " (TV busy)" : h.limit === "bandwidth" ? " (slow internet)" : "";
-        text = `getting the picture${h.sound === undefined ? "" : h.sound ? " and sound" : " · no sound yet"} · ${h.codec || "video"}${h.fps ? ` · ${h.fps} fps${busy}` : ""}`;
+        const snd = h.sound === undefined ? "" : !h.sound ? " · no sound playing" : h.soundSending === false ? " · sound not sending" : " and sound";
+        text = `getting the picture${snd} · ${h.codec || "video"}${h.fps ? ` · ${h.fps} fps${busy}` : ""}`;
         li.className = "ok";
       } else if (ice === "connected" || ice === "completed") {
         text = h.vp8 ? "connected, trying another video format…" : "connected, starting the picture…";
@@ -1623,7 +1628,7 @@
         addChat(m);
         return;
       case "remote":
-        applyRemote(m.action);
+        applyRemote(m.action, m.by);
         return;
       case "host-away":
         banner("The host's connection dropped. Waiting for them to come back…");
@@ -1692,6 +1697,7 @@
     setSide(!!S.companion);
     $("share-open").hidden = !host;
     $("people-open").hidden = !host;
+    $("ask-pause").hidden = host || !!S.companion;
     $("code-pill").hidden = !host;
     if (host) $("code-pill").textContent = formatCode(S.code);
     $("live-text").textContent = host ? `Live · ${quality().label.split(" ")[0]}` : "Live";
@@ -2604,10 +2610,26 @@
   $("remote-play").onclick = () => send({ type: "remote", action: "play" });
   $("remote-back").onclick = () => send({ type: "remote", action: "back" });
   $("remote-fwd").onclick = () => send({ type: "remote", action: "fwd" });
-  function applyRemote(action) {
+  function applyRemote(action, by) {
     if (typeof action !== "string") return;
     if (action.startsWith("faces:")) return setFaces(action.slice(6));
-    if (S.role !== "host" || S.source === "screen") return;
+    if (S.role !== "host") return;
+    // A friend pressed pause/play: it happens for everyone
+    if (by && (action === "pause" || action === "play")) {
+      toast(`${by} pressed ${action}`);
+      if (S.source === "screen") {
+        if (S.nativeSharing && typeof NATIVE.mediaKey === "function") try { NATIVE.mediaKey(action === "pause" ? "pause" : "playonly"); } catch {}
+        return;
+      }
+      if (action === "pause") filmVideo.pause();
+      else filmVideo.play().catch(() => {});
+      return;
+    }
+    if (S.source === "screen") {
+      // The paired phone's remote: ⏯ goes to whatever app is playing on the TV
+      if (action === "play" && S.nativeSharing && typeof NATIVE.mediaKey === "function") try { NATIVE.mediaKey("playpause"); } catch {}
+      return;
+    }
     showControls();
     if (action === "play") $("ctl-play").click();
     else if (action === "back") $("ctl-back").click();
@@ -2697,6 +2719,15 @@
   };
   $("end-now").onclick = () => send({ type: "end" });
   $("end-leave").onclick = () => leave();
+
+  // Friends: pause or play the film for everyone
+  let askedPause = false;
+  $("ask-pause").onclick = () => {
+    askedPause = !askedPause;
+    send({ type: "remote", action: askedPause ? "pause" : "play" });
+    setLabel($("ask-pause"), askedPause ? "Play for everyone" : "Pause for everyone");
+    $("ask-pause").title = askedPause ? "Play for everyone" : "Pause for everyone";
+  };
 
   // Host: People button opens the list where you can remove, block or report anyone
   $("people-open").onclick = () => {

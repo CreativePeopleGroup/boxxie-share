@@ -28,6 +28,7 @@ const DEFAULT_MAX_VIEWERS = 6; // direct streaming from home broadband
 const MAX_PENDING = 10;
 const MAX_NAME = 24;
 const REMOTE_ACTIONS = new Set(["play", "back", "fwd", "faces:corner", "faces:mini", "faces:off"]);
+const FRIEND_ACTIONS = new Set(["play", "pause"]);
 const MAX_CHAT = 500;
 const MAX_SIGNAL_BYTES = 64 * 1024;
 
@@ -794,6 +795,12 @@ export class Room extends DurableObject {
           if (host) this._send(host.ws, { type: "viewer-ready", id: a.id, name: a.name, companionOf: a.companionOf || null });
           return;
         case "remote": {
+          // Anyone watching can pause or play the film for everyone (it's a watch party).
+          if (!a.companionOf && FRIEND_ACTIONS.has(msg.action)) {
+            if (host) this._send(host.ws, { type: "remote", action: msg.action, by: a.name });
+            this._broadcastChat({ system: true, text: `${a.name} pressed ${msg.action === "pause" ? "pause" : "play/pause"}` });
+            return;
+          }
           // A paired phone works as the remote for its own TV or computer.
           if (!a.companionOf || !REMOTE_ACTIONS.has(msg.action)) return;
           const owner = a.companionOf === "host" ? host : this._byId(a.companionOf);
