@@ -636,6 +636,13 @@ public class MainActivity extends Activity {
             return updater.info();
         }
 
+        /** Is any app playing sound right now? (Used to notice when the film has finished.) */
+        @JavascriptInterface
+        public boolean mediaPlaying() {
+            android.media.AudioManager am = (android.media.AudioManager) getSystemService(AUDIO_SERVICE);
+            return am != null && am.isMusicActive();
+        }
+
         /** How this TV is connected: a VPN usually stops friends reaching the TV directly. */
         @JavascriptInterface
         public String networkInfo() {

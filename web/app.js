@@ -141,6 +141,8 @@
   };
 
   // ---------------- capability checks ----------------
+  // A see-through poster: Android TV and phone web views otherwise draw a big grey play button
+  const BLANK_POSTER = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
   const testVideo = document.createElement("video");
   const canHost = !!(testVideo.captureStream || testVideo.mozCaptureStream) && "RTCPeerConnection" in window;
   const canCall = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
@@ -1032,6 +1034,24 @@
     try { NATIVE.installUpdate(); } catch { updating = false; }
   };
 
+  // ----- TV app: notice when the film has finished -----
+  // While sharing the TV screen, Boxxie can't see inside the other app, but it can tell whether
+  // anything is playing sound. Nothing for 10 minutes = the film's over: start the 2-minute
+  // countdown (the host's phone can keep the room open). Sound again cancels it.
+  const QUIET_MS = (window.__boxxieQuietMs || 10 * 60 * 1000);
+  let lastSound = Date.now();
+  setInterval(() => {
+    if (S.role !== "host" || !S.nativeSharing || typeof NATIVE.mediaPlaying !== "function") return;
+    let playing = false;
+    try { playing = !!NATIVE.mediaPlaying(); } catch {}
+    if (playing) {
+      lastSound = Date.now();
+      if (S.endingWhy === "quiet") autoEnd(null);
+    } else if (!S.endingWhy && S.roster && S.roster.length && Date.now() - lastSound > QUIET_MS) {
+      autoEnd("quiet");
+    }
+  }, window.__boxxieQuietMs ? 1000 : 15000);
+
   // ----- TV app: warn when a VPN is on (it usually stops friends reaching the TV) -----
   function checkVpn() {
     let vpn = false;
@@ -1059,13 +1079,15 @@
   }
   function renderHealth() {
     const list = $("viewer-health");
-    for (const id of [...health.keys()]) if (!S.peers.has(id) && !S.names.has(id)) health.delete(id);
     list.replaceChildren();
-    for (const [id, h] of health) {
-      if (S.companionOf.has(id)) continue;
+    if (S.role !== "host" || !S.native) return (list.hidden = true);
+    // Everyone watching (from the room's list), with their picture status and a Remove button
+    for (const v of S.roster || []) {
+      const id = v.id;
+      const h = health.get(id) || {};
       const li = document.createElement("li");
       const who = document.createElement("b");
-      who.textContent = S.names.get(id) || "Friend";
+      who.textContent = v.name || S.names.get(id) || "Friend";
       const st = document.createElement("span");
       const ice = h.ice || "new";
       let text;
@@ -1081,7 +1103,16 @@
         text = "connecting…";
       }
       st.textContent = text;
-      li.append(who, st);
+      const right = document.createElement("span");
+      right.className = "vh-right";
+      const rm = document.createElement("button");
+      rm.className = "small";
+      rm.type = "button";
+      rm.textContent = "Remove";
+      rm.setAttribute("aria-label", `Remove ${v.name} from the room`);
+      rm.onclick = () => openPerson(v, true);
+      right.append(st, rm);
+      li.append(who, right);
       list.append(li);
     }
     list.hidden = !list.children.length;
@@ -1240,6 +1271,7 @@
     setLabel($("ctl-reshare"), "Open another app");
     try { NATIVE.setIceServers(JSON.stringify(S.ice || [])); } catch {}
     syncFilmToAll();
+    lastSound = Date.now();
     if (S.endingWhy) autoEnd(null);
     checkVpn();
   }
@@ -1602,7 +1634,7 @@
         if (S.role === "host") {
           cleanup();
           show("home");
-          toast({ expired: "The room reached its 12-hour limit and closed.", finished: "The film finished and the room closed.", idle: "Sharing stopped, so the room closed." }[m.reason] || "Room closed.");
+          toast({ expired: "The room reached its 12-hour limit and closed.", finished: "The film finished and the room closed.", idle: "Sharing stopped, so the room closed.", quiet: "Nothing played for a while, so the room closed." }[m.reason] || "Room closed.");
         } else {
           const why = {
             expired: "The room reached its 12-hour limit.",
@@ -1610,6 +1642,7 @@
             "paired-elsewhere": "Another device has been paired with the TV instead.",
             finished: "The film has finished. Thanks for watching!",
             idle: "The host stopped sharing, so the room closed. Thanks for watching!",
+            quiet: "Nothing has played on the TV for a while, so the room closed. Thanks for watching!",
           }[m.reason] || "The host has ended the session. Thanks for watching.";
           endWithMessage(m.reason && m.reason.startsWith("paired") ? "Call ended" : "The room has closed", why);
         }
@@ -1651,6 +1684,7 @@
     $("screen-room").classList.toggle("call-mode", !!S.companion);
     setSide(!!S.companion);
     $("share-open").hidden = !host;
+    $("people-open").hidden = !host;
     $("code-pill").hidden = !host;
     if (host) $("code-pill").textContent = formatCode(S.code);
     $("live-text").textContent = host ? `Live · ${quality().label.split(" ")[0]}` : "Live";
@@ -1822,6 +1856,8 @@
       if (v.companionOf) S.companionOf.set(v.id, v.companionOf);
     });
     renderPeople(m.viewers, true, m.maxViewers);
+    S.roster = m.viewers.filter((v) => !v.companionOf);
+    renderHealth();
     setPhonePaired(m.viewers.some((v) => v.companionOf === "host"));
   }
   function renderRequests(pending) {
@@ -2375,6 +2411,7 @@
       tile.className = "cam" + (isMe ? " me" : "");
       tile.dataset.id = id;
       const v = document.createElement("video");
+      v.poster = BLANK_POSTER; // Android's default poster is a big grey play button
       v.autoplay = true;
       v.playsInline = true;
       v.muted = isMe || S.phonePaired; // never play your own mic back; a paired phone plays the call instead
@@ -2599,7 +2636,7 @@
     }
     if (m.system) li.textContent = m.text;
     box.append(li);
-    while (box.children.length > 3) box.firstChild.remove();
+    while (box.children.length > (isTV ? 2 : 3)) box.firstChild.remove();
     setTimeout(() => li.classList.add("gone"), 6000);
     setTimeout(() => li.remove(), 6600);
     if (!m.system) $("chat-unread").hidden = false;
@@ -2615,7 +2652,7 @@
   // ---------------- the room closes itself when the film is over ----------------
   // Film or audio ends: everyone gets a 1-minute countdown. Host stops sharing: 10 minutes.
   // The host (or their paired phone) can keep the room open or close it straight away.
-  const AUTO_END = Object.assign({ finished: 60 * 1000, idle: 10 * 60 * 1000 }, window.__boxxieAutoEnd || {}); // tests shorten these
+  const AUTO_END = Object.assign({ finished: 60 * 1000, idle: 10 * 60 * 1000, quiet: 2 * 60 * 1000 }, window.__boxxieAutoEnd || {}); // tests shorten these
   let endTimer = null;
   function autoEnd(why) {
     if (S.role !== "host") return;
@@ -2632,7 +2669,7 @@
     }
     const until = Date.now() + ms;
     const ctrl = canControlRoom();
-    $("end-title").textContent = why === "idle" ? "Sharing has stopped" : "The film has finished";
+    $("end-title").textContent = why === "idle" ? "Sharing has stopped" : why === "quiet" ? "Nothing's playing on the TV" : "The film has finished";
     $("end-keep").hidden = !ctrl;
     $("end-now").hidden = !ctrl;
     $("end-leave").hidden = ctrl;
@@ -2653,6 +2690,16 @@
   };
   $("end-now").onclick = () => send({ type: "end" });
   $("end-leave").onclick = () => leave();
+
+  // Host: People button opens the list where you can remove, block or report anyone
+  $("people-open").onclick = () => {
+    if (!sideShowing()) $("toggle-side").click();
+    setTimeout(() => {
+      const c = [...document.querySelectorAll("#people-list button.chip")][0];
+      if (c) c.focus();
+      else toast("No one else is in the room yet.");
+    }, 120);
+  };
 
   // ---------------- leaving ----------------
   $("leave").onclick = () => {
