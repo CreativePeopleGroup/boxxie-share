@@ -144,6 +144,13 @@ public final class ScreenShareEngine {
                     @Override public void onWebRtcAudioRecordError(String e) { soundUnavailable(e); }
                 })
                 .createAudioDeviceModule();
+        // Never use the microphone here (Fire TV doesn't have one): the engine runs WebRTC's
+        // "recording-less" mode and fillWithPlayback supplies the sound of the TV's apps instead.
+        try {
+            adm.getClass().getMethod("setAudioRecordEnabled", boolean.class).invoke(adm, false);
+        } catch (Throwable t) {
+            Log.w(TAG, "recordingless audio not available", t);
+        }
         factory = PeerConnectionFactory.builder()
                 .setAudioDeviceModule(adm)
                 // Constrained-baseline H.264 (high profile off): decodes on every phone, iPhone and browser
@@ -290,40 +297,88 @@ public final class ScreenShareEngine {
     private Object playbackConfig; // AudioPlaybackCaptureConfiguration (API 29+)
     private int playbackRate, playbackChannels;
 
+    // Recording-less mode calls us in a tight loop: we hand over exactly one 10 ms frame per call
+    // and sleep until it's due, so the sound plays at real speed. A small buffer smooths out the
+    // uneven way the captured sound arrives.
+    private long nextFrameNs;
+    private byte[] ring = new byte[0];
+    private int ringFill;
+    private byte[] readScratch = new byte[0];
+
     @SuppressLint("MissingPermission")
     private void fillWithPlayback(ByteBuffer buffer, int channelCount, int sampleRate, int bytesRead) {
-        if (!sharing || Build.VERSION.SDK_INT < 29 || playbackConfig == null) {
-            zero(buffer, bytesRead);
-            return;
-        }
+        int frame = buffer.capacity();
         try {
-            if (playbackRecord == null || playbackRate != sampleRate || playbackChannels != channelCount) {
-                releasePlayback();
-                AudioFormat fmt = new AudioFormat.Builder()
-                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                        .setSampleRate(sampleRate)
-                        .setChannelMask(channelCount == 2 ? AudioFormat.CHANNEL_IN_STEREO : AudioFormat.CHANNEL_IN_MONO)
-                        .build();
-                int min = AudioRecord.getMinBufferSize(sampleRate,
-                        channelCount == 2 ? AudioFormat.CHANNEL_IN_STEREO : AudioFormat.CHANNEL_IN_MONO,
-                        AudioFormat.ENCODING_PCM_16BIT);
-                playbackRecord = new AudioRecord.Builder()
-                        .setAudioFormat(fmt)
-                        .setBufferSizeInBytes(Math.max(min * 4, bytesRead * 8))
-                        .setAudioPlaybackCaptureConfig((AudioPlaybackCaptureConfiguration) playbackConfig)
-                        .build();
-                playbackRecord.startRecording();
-                playbackRate = sampleRate;
-                playbackChannels = channelCount;
-                playbackScratch = ByteBuffer.allocateDirect(Math.max(bytesRead, 4096));
+            if (sharing && Build.VERSION.SDK_INT >= 29 && playbackConfig != null) {
+                if (playbackRecord == null || playbackRate != sampleRate || playbackChannels != channelCount) {
+                    releasePlayback();
+                    int mask = channelCount == 2 ? AudioFormat.CHANNEL_IN_STEREO : AudioFormat.CHANNEL_IN_MONO;
+                    AudioFormat fmt = new AudioFormat.Builder()
+                            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                            .setSampleRate(sampleRate)
+                            .setChannelMask(mask)
+                            .build();
+                    int min = AudioRecord.getMinBufferSize(sampleRate, mask, AudioFormat.ENCODING_PCM_16BIT);
+                    playbackRecord = new AudioRecord.Builder()
+                            .setAudioFormat(fmt)
+                            .setBufferSizeInBytes(Math.max(min * 4, frame * 20))
+                            .setAudioPlaybackCaptureConfig((AudioPlaybackCaptureConfiguration) playbackConfig)
+                            .build();
+                    playbackRecord.startRecording();
+                    playbackRate = sampleRate;
+                    playbackChannels = channelCount;
+                    ring = new byte[frame * 12];
+                    ringFill = 0;
+                    readScratch = new byte[frame * 4];
+                    Log.i(TAG, "playback capture started " + sampleRate + " Hz x" + channelCount);
+                }
+                // Take whatever has arrived (without waiting) into the ring
+                int n = playbackRecord.read(readScratch, 0, Math.min(readScratch.length, ring.length - ringFill), AudioRecord.READ_NON_BLOCKING);
+                if (n > 0) {
+                    System.arraycopy(readScratch, 0, ring, ringFill, n);
+                    ringFill += n;
+                }
+                if (n > 0 && !isSilent(readScratch, n)) soundSeenNs = System.nanoTime();
+                if (ringFill >= frame) {
+                    buffer.clear();
+                    buffer.put(ring, 0, frame);
+                    System.arraycopy(ring, frame, ring, 0, ringFill - frame);
+                    ringFill -= frame;
+                    // Too far behind (a hiccup): drop the backlog so the sound stays in step with the picture
+                    if (ringFill > frame * 8) ringFill = 0;
+                } else {
+                    zero(buffer, frame);
+                }
+            } else {
+                zero(buffer, frame);
             }
-            if (playbackScratch.capacity() < bytesRead) playbackScratch = ByteBuffer.allocateDirect(bytesRead);
-            playbackScratch.clear();
-            int n = playbackRecord.read(playbackScratch, bytesRead, AudioRecord.READ_NON_BLOCKING);
-            if (n < 0) n = 0;
-            for (int i = 0; i < bytesRead; i++) buffer.put(i, i < n ? playbackScratch.get(i) : (byte) 0);
         } catch (Throwable t) {
-            zero(buffer, bytesRead);
+            zero(buffer, frame);
+        }
+        pace();
+    }
+
+    private volatile long soundSeenNs;
+
+    private static boolean isSilent(byte[] b, int n) {
+        for (int i = 0; i + 1 < n; i += 64) {
+            int v = (short) ((b[i] & 0xff) | (b[i + 1] << 8));
+            if (v > 64 || v < -64) return false;
+        }
+        return true;
+    }
+
+    private void pace() {
+        long now = System.nanoTime();
+        if (nextFrameNs == 0 || now - nextFrameNs > 200_000_000L) nextFrameNs = now;
+        nextFrameNs += 10_000_000L;
+        long wait = nextFrameNs - System.nanoTime();
+        if (wait > 0) {
+            try {
+                Thread.sleep(wait / 1_000_000L, (int) (wait % 1_000_000L));
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 
@@ -431,7 +486,8 @@ public final class ScreenShareEngine {
         else v.noPictureChecks = 0;
         try {
             emit(event("viewer-stats").put("peer", id).put("ice", v.ice).put("frames", frames)
-                    .put("bytes", bytes).put("codec", codec).put("encoder", encoder).put("vp8", v.vp8));
+                    .put("bytes", bytes).put("codec", codec).put("encoder", encoder).put("vp8", v.vp8)
+                    .put("sound", System.nanoTime() - soundSeenNs < 5_000_000_000L));
         } catch (Exception ignored) {}
         // Connected for ~6 seconds and the H.264 encoder hasn't made a single frame: use VP8 instead.
         if (!v.vp8 && v.noPictureChecks >= 2) {

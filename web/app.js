@@ -1073,6 +1073,7 @@
       h.codec = ev.codec || h.codec;
       h.encoder = ev.encoder || h.encoder;
       h.vp8 = ev.vp8;
+      if (ev.sound !== undefined) h.sound = ev.sound;
     }
     health.set(ev.peer, h);
     renderHealth();
@@ -1095,7 +1096,7 @@
         text = "can't connect (network)";
         li.className = "bad";
       } else if ((ice === "connected" || ice === "completed") && h.frames > 0) {
-        text = `getting the picture · ${h.codec || "video"}${h.encoder ? ` (${h.encoder})` : ""}`;
+        text = `getting the picture${h.sound === undefined ? "" : h.sound ? " and sound" : " · no sound yet"} · ${h.codec || "video"}`;
         li.className = "ok";
       } else if (ice === "connected" || ice === "completed") {
         text = h.vp8 ? "connected, trying another video format…" : "connected, starting the picture…";
