@@ -2390,10 +2390,16 @@
       $("screen-status").dataset.q = qualityName(filmVideo.videoHeight);
     }
   });
-  $("sound-on").onclick = () => {
+  $("sound-on").onclick = async () => {
     filmVideo.muted = false;
-    filmVideo.play().catch(() => {});
-    $("sound-on").hidden = true;
+    try {
+      await filmVideo.play();
+      $("sound-on").hidden = !filmVideo.muted && !filmVideo.paused;
+    } catch {
+      // A failed play request must leave a way to retry on phones, browsers and TVs.
+      $("sound-on").hidden = false;
+      toast("Sound couldn't start. Press Turn sound on to try again.");
+    }
   };
 
   // ---------------- video call ----------------

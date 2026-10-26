@@ -87,6 +87,8 @@ public final class ScreenShareEngine {
     private VideoTrack videoTrack;
     private AudioSource audioSource;
     private AudioTrack audioTrack;
+    // The WebRTC audio thread and the worker both touch capture during stop/restart.
+    private final Object playbackLock = new Object();
     private AudioRecord playbackRecord;
     private ByteBuffer playbackScratch;
     private volatile boolean sharing;
@@ -147,11 +149,9 @@ public final class ScreenShareEngine {
                 .createAudioDeviceModule();
         // Never use the microphone here (Fire TV doesn't have one): the engine runs WebRTC's
         // "recording-less" mode and fillWithPlayback supplies the sound of the TV's apps instead.
-        try {
-            adm.getClass().getMethod("setAudioRecordEnabled", boolean.class).invoke(adm, false);
-        } catch (Throwable t) {
-            Log.w(TAG, "recordingless audio not available", t);
-        }
+        // This API is supplied by our pinned WebRTC SDK. Fail at compile time if it changes,
+        // rather than silently falling back to a microphone that a TV may not have.
+        adm.setAudioRecordEnabled(false);
         factory = PeerConnectionFactory.builder()
                 .setAudioDeviceModule(adm)
                 // Constrained-baseline H.264 (high profile off): decodes on every phone, iPhone and browser
@@ -240,7 +240,14 @@ public final class ScreenShareEngine {
                 videoTrack = factory.createVideoTrack("screen-video", videoSource);
 
                 boolean sound = startPlaybackCapture();
-                audioSource = factory.createAudioSource(new MediaConstraints());
+                // Film audio must not be treated as a voice call. Hardware processing is
+                // disabled on the ADM above; these constraints disable software processing.
+                MediaConstraints audioConstraints = new MediaConstraints();
+                for (String name : new String[]{"googEchoCancellation", "googAutoGainControl",
+                        "googNoiseSuppression", "googHighpassFilter"}) {
+                    audioConstraints.mandatory.add(new MediaConstraints.KeyValuePair(name, "false"));
+                }
+                audioSource = factory.createAudioSource(audioConstraints);
                 audioTrack = factory.createAudioTrack("screen-audio", audioSource);
                 audioTrack.setEnabled(sound);
 
@@ -288,7 +295,9 @@ public final class ScreenShareEngine {
                     .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
                     .build();
             // Opened lazily in fillWithPlayback with the same rate/channels as the call audio.
-            playbackConfig = cfg;
+            synchronized (playbackLock) {
+                playbackConfig = cfg;
+            }
             return true;
         } catch (Throwable t) {
             Log.w(TAG, "playback capture", t);
@@ -331,13 +340,21 @@ public final class ScreenShareEngine {
 
     @SuppressLint("MissingPermission")
     private void fillWithPlayback(ByteBuffer buffer, int channelCount, int sampleRate, int bytesRead) {
+        synchronized (playbackLock) {
+            fillPlaybackFrame(buffer, channelCount, sampleRate);
+        }
+        // Never hold the capture lock while waiting or while closing WebRTC peers.
+        pace();
+    }
+
+    @SuppressLint("MissingPermission")
+    private void fillPlaybackFrame(ByteBuffer buffer, int channelCount, int sampleRate) {
         int frame = buffer.capacity();
         callbacks++;
         lastFormat = sampleRate + "Hz x" + channelCount;
-        if (System.nanoTime() < toneUntilNs) {
+        if (sharing && System.nanoTime() < toneUntilNs) {
             fillTone(buffer, frame, channelCount, sampleRate);
             outgoingPeak = pcmPeak(buffer, frame);
-            pace();
             return;
         }
         try {
@@ -345,7 +362,7 @@ public final class ScreenShareEngine {
                 if (app.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
                     audioState = "no-permission";
                     zero(buffer, frame);
-                    pace();
+                    outgoingPeak = 0;
                     return;
                 }
                 if (playbackRecord == null || playbackRate != sampleRate || playbackChannels != channelCount) {
@@ -357,12 +374,19 @@ public final class ScreenShareEngine {
                             .setChannelMask(mask)
                             .build();
                     int min = AudioRecord.getMinBufferSize(sampleRate, mask, AudioFormat.ENCODING_PCM_16BIT);
+                    if (min <= 0) throw new IllegalStateException("Unsupported playback capture format: " + min);
                     playbackRecord = new AudioRecord.Builder()
                             .setAudioFormat(fmt)
                             .setBufferSizeInBytes(Math.max(min * 4, frame * 20))
                             .setAudioPlaybackCaptureConfig((AudioPlaybackCaptureConfiguration) playbackConfig)
                             .build();
+                    if (playbackRecord.getState() != AudioRecord.STATE_INITIALIZED) {
+                        throw new IllegalStateException("Playback recorder did not initialise");
+                    }
                     playbackRecord.startRecording();
+                    if (playbackRecord.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) {
+                        throw new IllegalStateException("Playback recorder did not start");
+                    }
                     playbackRate = sampleRate;
                     playbackChannels = channelCount;
                     ring = new byte[frame * 12];
@@ -372,6 +396,9 @@ public final class ScreenShareEngine {
                 }
                 // Take whatever has arrived (without waiting) into the ring
                 int n = playbackRecord.read(readScratch, 0, Math.min(readScratch.length, ring.length - ringFill), AudioRecord.READ_NON_BLOCKING);
+                // In particular ERROR_DEAD_OBJECT requires a new recorder. Previously all
+                // negative reads were ignored forever, leaving a dead capture path silent.
+                if (n < 0) throw new IllegalStateException("Playback capture read failed: " + n);
                 if (n > 0) {
                     System.arraycopy(readScratch, 0, ring, ringFill, n);
                     ringFill += n;
@@ -381,6 +408,7 @@ public final class ScreenShareEngine {
                     bytesSeenNs = t;
                     capturedPcmBytes += n;
                     capturedPeak = pcmPeak(readScratch, n);
+                    captureError = "";
                 }
                 if (n > 0 && !isSilent(readScratch, n)) soundSeenNs = t;
                 audioState = t - soundSeenNs < 5_000_000_000L ? "ok" : t - bytesSeenNs < 5_000_000_000L ? "silent" : "nodata";
@@ -405,7 +433,6 @@ public final class ScreenShareEngine {
             zero(buffer, frame);
         }
         outgoingPeak = pcmPeak(buffer, frame);
-        pace();
     }
 
     private static int pcmPeak(byte[] data, int length) {
@@ -465,11 +492,13 @@ public final class ScreenShareEngine {
     }
 
     private void releasePlayback() {
+        // Caller owns playbackLock, including when recovering from a failed read.
         if (playbackRecord != null) {
             try { playbackRecord.stop(); } catch (Throwable ignored) {}
             try { playbackRecord.release(); } catch (Throwable ignored) {}
             playbackRecord = null;
         }
+        ringFill = 0;
     }
 
     // ------------------------------------------------------------------ viewers
@@ -674,13 +703,20 @@ public final class ScreenShareEngine {
         boolean wasSharing = sharing;
         sharing = false;
         stopHealthChecks();
-        capturedPcmBytes = 0;
-        capturedPeak = 0;
-        outgoingPeak = 0;
-        captureError = "";
+        synchronized (playbackLock) {
+            playbackConfig = null;
+            releasePlayback();
+            toneUntilNs = 0;
+            tonePhase = 0;
+            capturedPcmBytes = 0;
+            capturedPeak = 0;
+            outgoingPeak = 0;
+            captureError = "";
+            soundSeenNs = 0;
+            bytesSeenNs = 0;
+            audioState = "none";
+        }
         for (String id : new ArrayList<>(viewers.keySet())) closeViewer(id, true);
-        releasePlayback();
-        playbackConfig = null;
         if (capturer != null) {
             try { capturer.stopCapture(); } catch (Throwable ignored) {}
             try { capturer.dispose(); } catch (Throwable ignored) {}
