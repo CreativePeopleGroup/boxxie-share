@@ -16,6 +16,7 @@
   // Picture quality. Bitrate is per friend, sent from the host's home connection.
   // If the connection can't keep up, WebRTC steps the picture down automatically.
   const QUALITY = {
+    auto: { label: "Auto 1080p", height: 1080, width: 1920, maxBitrate: 4_000_000, automatic: true },
     smooth: { label: "Smooth 720p", height: 720, width: 1280, maxBitrate: 2_500_000 },
     hd: { label: "HD 1080p", height: 1080, width: 1920, maxBitrate: 8_000_000 },
     "4k": { label: "4K Ultra HD", height: 2160, width: 3840, maxBitrate: 25_000_000 },
@@ -72,7 +73,7 @@
   const S = {
     role: null, // "host" | "viewer"
     source: "file", // host: "file" | "screen"
-    quality: "hd", // host: "smooth" | "hd" | "4k"
+    quality: "auto", // host: "auto" | "smooth" | "hd" | "4k"
     capture: null, // host: stream captured from the film player
     code: null,
     hostToken: null,
@@ -741,6 +742,7 @@
   document.querySelectorAll("[data-source]").forEach((b) => (b.onclick = () => setSource(b.dataset.source)));
   setSource(canHost ? "file" : "screen");
   const qualityNotes = {
+    auto: "Automatically adjusts to each connection, up to 1080p and 4 Mbps of video per friend. Favours smooth motion by reducing resolution when needed.",
     "4k": "4K needs about 25 Mbps of upload for each friend, so it suits 1–2 friends on full-fibre broadband, with a 4K film or screen. If your connection can't keep up, the picture steps down by itself.",
     smooth: "Uses up to 2.5 Mbps of video upload per friend, plus sound and network overhead. Try this for remote viewers, VPNs or a choppy picture.",
     hd: "Up to 8 Mbps of video upload per friend, plus sound and network overhead. Choose Smooth 720p if the picture is choppy.",
@@ -756,14 +758,15 @@
   }
   function setQuality(q) {
     if (!QUALITY[q]) return;
+    if (q === "auto" && NATIVE && !nativeInfo.automaticQuality) q = "hd";
     S.quality = q;
     document.querySelectorAll("[data-quality]").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.quality === q)));
     $("quality-note").querySelectorAll("[data-quality-note]").forEach(note =>
       note.setAttribute("aria-hidden", String(note.dataset.qualityNote !== q)));
-    if (q === "4k" && Number($("max-viewers").value) > 3) $("max-viewers").value = "3";
   }
   document.querySelectorAll("[data-quality]").forEach((b) => (b.onclick = () => setQuality(b.dataset.quality)));
-  setQuality("hd");
+  document.querySelector('[data-quality="auto"]').hidden = !!NATIVE && !nativeInfo.automaticQuality;
+  setQuality("auto");
 
   // Install hint for phones
   const DOWNLOADER_CODE = "1920999"; // AFTVnews short code for the latest BoxxieShare.apk
@@ -1054,6 +1057,14 @@
     setInterval(() => checkForUpdate(false), 6 * 60 * 60 * 1000);
   }
   $("update-check").onclick = () => checkForUpdate(true);
+  if (NATIVE) {
+    const details = [[nativeInfo.manufacturer, nativeInfo.model].filter(Boolean).join(" "),
+      nativeInfo.androidVersion ? `Android ${nativeInfo.androidVersion}` : `Android API ${nativeInfo.sdk || "?"}`,
+      nativeInfo.webViewVersion ? `WebView ${nativeInfo.webViewVersion}` : "",
+      nativeInfo.automaticQuality ? "Automatic quality supported" : "Update the app for automatic quality"].filter(Boolean);
+    $("device-info").textContent = details.join(" · ");
+    $("device-info").hidden = false;
+  }
   $("update-btn").onclick = () => {
     if (updating) return;
     updating = true;
@@ -1112,6 +1123,7 @@
         h.audioBytes = ev.audioBytes;
       }
       h.fps = ev.fps;
+      h.height = ev.height;
       h.audioState = ev.audioState;
       h.audioFrames = ev.audioFrames;
       h.audioFormat = ev.audioFormat;
@@ -1157,7 +1169,7 @@
           none: " · no sound",
         }[h.audioState];
         const snd = h.sound === undefined ? "" : !h.sound ? why || " · no sound playing" : h.soundSending === false ? " · sound not sending" : " and sound";
-        text = `getting the picture${snd} · ${h.codec || "video"}${h.fps ? ` · ${h.fps} fps${busy}` : ""}`;
+        text = `getting the picture${snd}${h.height ? ` · ${qualityName(h.height)}` : ""} · ${h.codec || "video"}${h.fps ? ` · ${h.fps} fps${busy}` : ""}`;
         li.className = "ok";
       } else if (ice === "connected" || ice === "completed") {
         text = h.vp8 ? "connected, trying another video format…" : "connected, starting the picture…";
@@ -2473,7 +2485,7 @@
         preferCodecs(tx);
         try {
           const params = tx.sender.getParameters();
-          params.degradationPreference = "balanced"; // trade a little sharpness for smooth motion when needed
+          params.degradationPreference = Q.automatic ? "maintain-framerate" : "balanced";
           tx.sender.setParameters(params).catch(() => {});
         } catch {}
       }

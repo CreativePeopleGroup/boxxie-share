@@ -118,6 +118,8 @@ async function mediaProgress(page) {
       userAgent: 'Mozilla/5.0 (Linux; Android 11; AFTKA) AppleWebKit/537.36 Chrome/130.0 Safari/537.36 BoxxieShareTV/1',
     });
     await host.addInitScript(bridge);
+    const networkTest = process.env.BOXXIE_NETWORK_TEST === '1';
+    await host.addInitScript(value => { window.__networkTest = value; }, networkTest);
     const viewer = await signedInPage(viewerBrowser, `Audio ${engine}`);
     const errors = [];
     for (const page of [host, viewer]) page.on('pageerror', error => errors.push(String(error)));
@@ -140,6 +142,11 @@ async function mediaProgress(page) {
     await navigation;
     await host.unroute('**/app.js');
     await host.locator('#screen-home:not([hidden])').waitFor();
+    assert.equal(await host.locator('[data-quality="auto"]').getAttribute('aria-checked'), 'true', 'Supported hosts default to Auto');
+    assert.equal(await host.locator('#max-viewers').inputValue(), '3', 'Room capacity defaults to three viewers');
+    assert.deepEqual(await host.locator('#max-viewers option').evaluateAll(options => options.map(o => o.value)),
+      ['2', '3', '4', '6', '8'], 'Room capacity still offers up to eight viewers');
+    assert((await host.locator('#device-info').textContent()).includes('Simulated TV'), 'Account diagnostics identify the reported device');
     // Force an actually late font response, beyond font-display: optional's
     // brief initial window, rather than testing only a warm/fast font load.
     await new Promise(resolve => setTimeout(resolve, 200));
@@ -156,6 +163,7 @@ async function mediaProgress(page) {
       'Home card geometry stays stable after startup and font loading');
     console.log(`PASS ${engine}: cold startup sizes TV cards before showing them, without a late font/layout jump`);
     await host.locator('[data-source="screen"]').click();
+    await host.locator('#max-viewers').selectOption('8');
     for (const width of [960, 1280, 1920]) {
       await host.setViewportSize({ width, height: Math.round(width * 9 / 16) });
       await host.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
@@ -168,7 +176,7 @@ async function mediaProgress(page) {
         const initial = bounds(), frames = [], writes = [], notes = [];
         const observer = new MutationObserver(records => writes.push(...records.map(r => r.oldValue)));
         observer.observe(root, { attributes: true, attributeFilter: ['style'], attributeOldValue: true });
-        for (const q of ['hd', '4k', 'smooth', 'hd']) {
+        for (const q of ['auto', 'hd', '4k', 'smooth', 'auto']) {
           document.querySelector(`[data-quality="${q}"]`).click();
           // Reproduce content-triggered TV WebView resize notifications.
           window.dispatchEvent(new Event('resize'));
@@ -184,9 +192,11 @@ async function mediaProgress(page) {
       assert(stability.frames.every(frame => frame.every((box, i) => box.every((v, j) => Math.abs(v - stability.initial[i][j]) < 1))),
         `${width}px TV: resolution selection keeps card/button positions and dimensions stable`);
       assert.equal(stability.writes.length, 0, 'Resolution changes and unchanged-viewport resize events do not reset TV zoom');
-      assert.deepEqual(stability.notes, [['hd'], ['4k'], ['smooth'], ['hd']], 'Only the selected resolution help is exposed');
+      assert.deepEqual(stability.notes, [['auto'], ['hd'], ['4k'], ['smooth'], ['auto']], 'Only the selected resolution help is exposed');
+      assert.equal(await host.locator('#max-viewers').inputValue(), '8', 'Resolution changes preserve the selected eight-viewer capacity');
     }
     await host.setViewportSize({ width: 1280, height: 720 });
+    await host.locator('#max-viewers').selectOption('3');
     console.log(`PASS ${engine}: repeated resolution changes stay stable across 960/1280/1920 TV widths`);
     await host.locator('[data-quality="smooth"]').click();
     for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 720 }]) {
@@ -213,10 +223,12 @@ async function mediaProgress(page) {
     }));
     assert(actions.every(a => a.width > 0 && a.height > 0 && Math.abs(a.width - actions[0].width) < 1 && Math.abs(a.height - actions[0].height) < 1 && Math.abs(a.bottom - actions[0].bottom) < 1),
       'Home actions match in size and baseline');
+    if (networkTest) await host.locator('[data-quality="auto"]').click();
     await host.locator('#host-start').click();
     assert.deepEqual(await host.evaluate(() => window.__lastShareConfig.quality),
-      { label: 'Smooth 720p', height: 720, width: 1280, maxBitrate: 2500000 },
-      'Smooth profile passes a 720p / 2.5 Mbps limit to the native engine');
+      networkTest ? { label: 'Auto 1080p', height: 1080, width: 1920, maxBitrate: 4000000, automatic: true }
+        : { label: 'Smooth 720p', height: 720, width: 1280, maxBitrate: 2500000 },
+      'The selected profile reaches the native bridge with its correct limits');
     await host.locator('#code-tiles .tile').first().waitFor({ state: 'attached' });
     const code = (await host.locator('#code-tiles .tile').allTextContents()).join('');
     await viewer.goto(`${BASE}#join=${code}`);
@@ -281,6 +293,7 @@ async function mediaProgress(page) {
       return !film.paused && !film.muted && document.getElementById('sound-on').hidden;
     });
     console.log(`PASS ${engine}: user gesture starts unmuted playback`);
+    if (networkTest) await require('./network_adaptation.cjs')(viewer);
     await viewer.evaluate(() => document.getElementById('viewer-status').click());
     await viewer.waitForFunction(() => document.getElementById('screen-diag').textContent.includes('Mbps received'));
     await viewer.evaluate(() => document.getElementById('viewer-status').click());
@@ -399,6 +412,14 @@ async function mediaProgress(page) {
     await viewer.reload();
     await viewer.locator('#screen-home:not([hidden])').waitFor();
     console.log(`PASS ${engine}: removed viewer is not silently restored on refresh`);
+    const legacy = await signedInPage(hostBrowser, 'Legacy app');
+    await legacy.addInitScript(bridge);
+    await legacy.addInitScript(() => { window.__legacyNative = true; });
+    await legacy.goto(BASE);
+    await legacy.locator('#screen-home:not([hidden])').waitFor();
+    assert(await legacy.locator('[data-quality="auto"]').isHidden(), 'Older apps do not advertise unsupported Auto');
+    assert.equal(await legacy.locator('[data-quality="hd"]').getAttribute('aria-checked'), 'true');
+    await legacy.close();
     assert.deepEqual(errors, [], 'No uncaught browser errors');
   } finally {
     if (viewerBrowser) await viewerBrowser.close();

@@ -112,8 +112,9 @@
           <div class="field">
             <span class="label" id="quality-label">Picture</span>
             <div class="segmented" role="radiogroup" aria-labelledby="quality-label">
-              <button type="button" role="radio" aria-checked="false" data-quality="smooth">Smooth 720p</button>
-              <button type="button" role="radio" aria-checked="true" data-quality="hd">HD 1080p</button>
+              <button type="button" role="radio" aria-checked="true" data-quality="auto" aria-label="Auto quality, recommended">Auto</button>
+              <button type="button" role="radio" aria-checked="false" data-quality="smooth" aria-label="Smooth 720p">720p</button>
+              <button type="button" role="radio" aria-checked="false" data-quality="hd" aria-label="HD 1080p">1080p</button>
               <button type="button" role="radio" aria-checked="false" data-quality="4k" aria-label="4K Ultra HD">4K</button>
             </div>
             <small class="note" id="quality-note"></small>
@@ -123,9 +124,9 @@
             <label for="max-viewers" class="label">Up to</label>
             <select id="max-viewers">
               <option value="2">2</option>
-              <option value="3">3</option>
+              <option value="3" selected>3</option>
               <option value="4">4</option>
-              <option value="6" selected>6</option>
+              <option value="6">6</option>
               <option value="8">8</option>
             </select>
             <span class="muted">friends</span>
@@ -311,6 +312,7 @@
           <span class="note" id="app-version-text">Boxxie Share</span>
           <button class="small" id="update-check" type="button">Check for updates</button>
         </div>
+        <p class="note" id="device-info" hidden></p>
         <h3>Signing in</h3>
         <div class="security-rows">
           <div class="sec-row">

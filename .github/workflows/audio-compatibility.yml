@@ -51,6 +51,7 @@ jobs:
         working-directory: server
         env:
           BOXXIE_BROWSER: ${{ matrix.browser }}
+          BOXXIE_NETWORK_TEST: ${{ matrix.browser == 'chromium' && '1' || '0' }}
         run: |
           node --import ./test/register.mjs test/devserver.mjs 8788 > /tmp/boxxie-test-server.log 2>&1 &
           server_pid=$!
@@ -65,5 +66,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: BoxxieShare-layout-${{ matrix.browser }}
-          path: /tmp/boxxie-ui-*.png
+          path: |
+            /tmp/boxxie-ui-*.png
+            /tmp/boxxie-network-report.json
           if-no-files-found: ignore

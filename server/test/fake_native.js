@@ -9,7 +9,25 @@
   function makeStream() {
     const c = document.createElement("canvas"); c.width = 1280; c.height = 720;
     const g = c.getContext("2d"); let n = 0;
-    timer = setInterval(() => { if (playbackPaused) return; n++; g.fillStyle = `hsl(${n % 360},60%,45%)`; g.fillRect(0, 0, 1280, 720); g.fillStyle = "#fff"; g.font = "64px sans-serif"; g.fillText("TV screen " + n, 80, 360); }, 33);
+    const noise = document.createElement('canvas'); noise.width = 160; noise.height = 90;
+    const ng = noise.getContext('2d'); const pixels = ng.createImageData(160, 90);
+    let seed = 12345;
+    timer = setInterval(() => { if (playbackPaused) return; n++;
+      if (window.__networkTest) {
+        // A persistent textured scene with one moving band; replacing every
+        // pixel with independent noise is an unrepresentative worst-case codec load.
+        const first = ((n - 1) * 16) % 160;
+        for (let y = 0; y < 90; y++) for (let x = first; x < first + 16; x++) {
+          const i = (y * 160 + x) * 4;
+          seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+          pixels.data[i] = seed & 255; pixels.data[i + 1] = (seed >>> 8) & 255;
+          pixels.data[i + 2] = (seed >>> 16) & 255; pixels.data[i + 3] = 255;
+        }
+        ng.putImageData(pixels, 0, 0); g.imageSmoothingEnabled = false;
+        g.drawImage(noise, 0, 0, 1280, 720);
+      } else { g.fillStyle = `hsl(${n % 360},60%,45%)`; g.fillRect(0, 0, 1280, 720); }
+      g.fillStyle = "#fff"; g.font = "64px sans-serif"; g.fillText("TV screen " + n, 80, 360);
+    }, 33);
     const s = c.captureStream(30);
     const ac = new AudioContext(); const o = ac.createOscillator(); const d = ac.createMediaStreamDestination();
     const gain = ac.createGain(); o.connect(gain); gain.connect(d); o.start();
@@ -20,7 +38,8 @@
   }
   window.__nativeCalls = [];
   window.BoxxieNative = {
-    screenShareInfo: () => JSON.stringify({ available: true, audio: true, sdk: 34 }),
+    screenShareInfo: () => JSON.stringify({ available: true, audio: true, sdk: 34, automaticQuality: !window.__legacyNative,
+      manufacturer: "Test", model: "Simulated TV", androidVersion: "14", webViewVersion: "test" }),
     startScreenShare: (cfg) => {
       window.__nativeCalls.push("start");
       window.__lastShareConfig = JSON.parse(cfg);
@@ -39,7 +58,16 @@
       if (pcs.has(id)) pcs.get(id).close();
       const pc = new RTCPeerConnection({ iceServers: ice });
       pcs.set(id, pc);
-      stream.getTracks().forEach((t) => pc.addTransceiver(t, { direction: "sendonly", streams: [stream] }));
+      for (const t of stream.getTracks()) {
+        const quality = window.__lastShareConfig && window.__lastShareConfig.quality;
+        const tx = pc.addTransceiver(t, { direction: "sendonly", streams: [stream],
+          ...(t.kind === "video" && quality ? { sendEncodings: [{ maxBitrate: quality.maxBitrate, maxFramerate: 30 }] } : {}) });
+        if (t.kind === "video" && quality && quality.automatic) {
+          const params = tx.sender.getParameters();
+          params.degradationPreference = "maintain-framerate";
+          await tx.sender.setParameters(params);
+        }
+      }
       pc.onicecandidate = (e) => e.candidate && emit({ type: "signal", peer: id, data: { session, candidate: e.candidate.toJSON() } });
       pc.oniceconnectionstatechange = () => emit({ type: "viewer-state", peer: id, ice: pc.iceConnectionState });
       const tick = setInterval(async () => {
