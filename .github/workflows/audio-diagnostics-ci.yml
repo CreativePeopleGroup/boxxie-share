@@ -24,7 +24,7 @@ jobs:
           gradle-version: '8.13'
       - name: Compile Android audio fix APK (not a release)
         run: |
-          gradle -p android assembleDirectRelease \
+          gradle -p android assembleDirectRelease testDirectDebugUnitTest \
             -PappUrl="https://creativepeoplegroup.github.io/boxxie-share/" \
             -PversionCode=1017 -PversionName=1.0.16-audio-fix \
             -PupdateUrl="https://github.com/CreativePeopleGroup/boxxie-share/releases/latest/download/"

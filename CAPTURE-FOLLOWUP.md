@@ -23,3 +23,36 @@ The browser integration test verifies only bridge wiring and normal WebRTC playb
 
 Upstream source: https://github.com/webrtc-sdk/webrtc/blob/m144_release/sdk/android/api/org/webrtc/ScreenCapturerAndroid.java
 Android display flags: https://developer.android.com/reference/android/hardware/display/DisplayManager
+
+## Background result after 1.0.22
+
+The user reports the Android capture-test tone is audible on both TV and phone while
+Boxxie is visible. Pressing Home stops that tone on the phone while it continues on the
+TV. Hot Player and Stream Team still have no remote audio. This isolates an activity
+foreground/background transition; source-player policy is not established as the cause.
+
+ScreenShareService declared and activated only mediaProjection. The follow-up adds
+the microphone foreground-service type for Android 11+ when RECORD_AUDIO is granted,
+alongside the existing projection type. Android uses this recording capability for
+AudioRecord; the audio device still runs recording-less WebRTC and playback capture,
+without opening the hardware microphone. Android 14+ permission refusal retains video
+with an explicit error instead of silently promising background audio.
+
+Regression coverage checks SDK/permission boundaries and the actual manifest contract.
+The necessary physical check remains: start the tone, press Home immediately, and confirm
+the phone continues hearing it, then repeat playback in the two third-party players.
+
+## Viewer refresh and UI rules
+
+The phone viewer now remembers its approved room per tab and account across a refresh.
+Transient ticket/network failures retry; stale socket events and overlapping reconnects
+cannot replace the current connection. Explicit leave/sign-out, host removal and closed
+rooms clear recovery state as appropriate. Server-side approval and authentication stay
+authoritative. Automated browser scenarios cover locked-room refresh, failed ticket
+fetches, manual rejoin and removal, with auth seeded only once before navigation.
+
+Sound-test buttons and screen-action buttons use matching dimensions within each group.
+TV and phone viewport geometry checks and rendered previews verify alignment and preserve
+visible keyboard/remote focus outlines. The persistent development rule is in AGENTS.md.
+
+Android recording service type: https://developer.android.com/reference/android/content/pm/ServiceInfo#FOREGROUND_SERVICE_TYPE_MICROPHONE

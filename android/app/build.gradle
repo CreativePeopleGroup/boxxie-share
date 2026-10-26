@@ -87,9 +87,15 @@ android {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
     }
+    testOptions {
+        unitTests.all { task ->
+            task.systemProperty 'boxxie.manifest', project.file('src/main/AndroidManifest.xml').absolutePath
+        }
+    }
 }
 
 dependencies {
+    testImplementation 'junit:junit:4.13.2'
     // Google's open-source WebRTC engine (prebuilt by the webrtc-sdk project): the video engine
     // that sends the whole screen to friends while the app is in the background.
     implementation 'io.github.webrtc-sdk:android:144.7559.15'
