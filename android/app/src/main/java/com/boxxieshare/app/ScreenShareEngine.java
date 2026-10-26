@@ -220,13 +220,16 @@ public final class ScreenShareEngine {
                 ensureFactory();
                 stopCaptureInternal(false);
                 session = UUID.randomUUID().toString().substring(0, 8);
+                final String captureSession = session;
 
                 capturer = new ScreenCapturerAndroid(permission, new MediaProjection.Callback() {
                     @Override
                     public void onStop() {
                         // The person stopped it from the system (notification, quick setting, pop-up).
                         worker.execute(() -> {
-                            if (sharing) stopCaptureInternal(true);
+                            // A delayed callback from the previous projection must not stop
+                            // a new sharing session that has already started on this worker.
+                            if (sharing && captureSession.equals(session)) stopCaptureInternal(true);
                         });
                     }
                 });

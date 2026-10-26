@@ -7,6 +7,7 @@ The receiving-device target is current iPhone/iPad Safari, Android Chrome and th
 - Recreate the Android playback recorder after a negative read, including a dead audio service. Previously these errors were ignored indefinitely.
 - Validate recorder format, initialisation and recording state rather than treating construction as success.
 - Protect recorder reads, creation and release with the same lock. Clear old samples and sound state on stop/restart.
+- Ignore delayed stop callbacks from older Android capture sessions so they cannot stop a newly restarted session.
 - Use the pinned WebRTC recording-less API directly, so an incompatible dependency fails compilation rather than silently reverting to microphone capture.
 - Request that WebRTC disable software voice processing for film audio, in addition to the existing hardware processing settings.
 - Keep the viewer's sound button available if playback is refused. This applies to every browser using the viewer.
