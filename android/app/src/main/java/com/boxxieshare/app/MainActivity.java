@@ -594,6 +594,14 @@ public class MainActivity extends Activity {
                 o.put("audio", Build.VERSION.SDK_INT >= 29);
                 o.put("sdk", Build.VERSION.SDK_INT);
                 o.put("tv", isTv());
+                o.put("automaticQuality", true);
+                o.put("manufacturer", Build.MANUFACTURER);
+                o.put("model", Build.MODEL);
+                o.put("androidVersion", Build.VERSION.RELEASE);
+                if (Build.VERSION.SDK_INT >= 26) {
+                    android.content.pm.PackageInfo provider = WebView.getCurrentWebViewPackage();
+                    if (provider != null) o.put("webViewVersion", provider.versionName);
+                }
             } catch (Exception ignored) {}
             return o.toString();
         }

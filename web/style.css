@@ -818,7 +818,7 @@ textarea:focus { border-color: rgba(239, 203, 153, 0.6); outline: none; }
 .screen-host .stage-empty-in { width: 100%; max-width: 1160px; }
 .opts-row { --picture-control-height: 64px; }
 .opts-row [aria-labelledby="quality-label"] { height: var(--picture-control-height); box-sizing: border-box; }
-.opts-row [aria-labelledby="quality-label"] button { white-space: normal; min-height: 0; }
+.opts-row [aria-labelledby="quality-label"] button { white-space: normal; min-height: 0; padding-inline: 0.25em; }
 .opts-row .field.inline select { height: var(--picture-control-height); min-height: var(--picture-control-height); }
 @media (max-width: 860px) {
   .opts-row { --picture-control-height: 50px; }

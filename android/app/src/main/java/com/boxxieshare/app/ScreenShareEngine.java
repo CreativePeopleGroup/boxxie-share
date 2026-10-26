@@ -97,6 +97,7 @@ public final class ScreenShareEngine {
     private int maxBitrate = 8_000_000;
     private int captureHeight = 1080;
     private int maxHeight = 1080;
+    private boolean automaticQuality;
     private final Map<String, Viewer> viewers = new HashMap<>();
 
     private static final class Viewer {
@@ -172,8 +173,11 @@ public final class ScreenShareEngine {
                 if (o.has("iceServers")) setIce(o.getJSONArray("iceServers"));
                 JSONObject q = o.optJSONObject("quality");
                 if (q != null) {
-                    maxBitrate = q.optInt("maxBitrate", maxBitrate);
-                    maxHeight = q.optInt("height", maxHeight);
+                    automaticQuality = q.optBoolean("automatic", false);
+                    VideoQualityProfile profile = new VideoQualityProfile(automaticQuality,
+                            q.optInt("height", maxHeight), q.optInt("maxBitrate", maxBitrate), false);
+                    maxBitrate = profile.bitrate;
+                    maxHeight = profile.height;
                 }
             } catch (Exception e) {
                 Log.w(TAG, "configure", e);
@@ -636,6 +640,7 @@ public final class ScreenShareEngine {
         if (viewers.get(id) != v) return;
         long frames = 0, bytes = 0;
         double fps = 0;
+        int width = 0, height = 0;
         String encoder = "", codec = "", limit = "";
         Map<String, RTCStats> all = report.getStatsMap();
         long audioBytes = 0;
@@ -654,6 +659,8 @@ public final class ScreenShareEngine {
             if (b instanceof Number) bytes += ((Number) b).longValue();
             Object fr = m.get("framesPerSecond");
             if (fr instanceof Number) fps = ((Number) fr).doubleValue();
+            if (m.get("frameWidth") instanceof Number) width = ((Number) m.get("frameWidth")).intValue();
+            if (m.get("frameHeight") instanceof Number) height = ((Number) m.get("frameHeight")).intValue();
             Object ql = m.get("qualityLimitationReason");
             if (ql != null) limit = String.valueOf(ql);
             Object impl = m.get("encoderImplementation");
@@ -672,6 +679,7 @@ public final class ScreenShareEngine {
                     .put("bytes", bytes).put("codec", codec).put("encoder", encoder).put("vp8", v.vp8)
                     .put("sound", System.nanoTime() - soundSeenNs < 5_000_000_000L)
                     .put("fps", Math.round(fps)).put("limit", limit).put("audioBytes", audioBytes)
+                    .put("width", width).put("height", height).put("automaticQuality", automaticQuality)
                     .put("audioState", audioState).put("audioFrames", callbacks).put("audioFormat", lastFormat)
                     .put("capturedPcmBytes", capturedPcmBytes).put("capturedPeak", capturedPeak)
                     .put("outgoingPeak", outgoingPeak).put("captureError", captureError));
@@ -686,19 +694,23 @@ public final class ScreenShareEngine {
     private void limitBitrate(RtpSender sender, boolean vp8) {
         try {
             RtpParameters p = sender.getParameters();
+            VideoQualityProfile profile = new VideoQualityProfile(automaticQuality, maxHeight, maxBitrate, vp8);
+            p.degradationPreference = automaticQuality
+                    ? RtpParameters.DegradationPreference.MAINTAIN_FRAMERATE
+                    : RtpParameters.DegradationPreference.BALANCED;
             for (RtpParameters.Encoding e : p.encodings) {
-                if (vp8) {
-                    // VP8 is encoded by the TV's processor (no hardware help): 720p at 24 fps keeps
-                    // up on a Fire TV Stick while it's also playing the film.
-                    e.maxBitrateBps = Math.min(maxBitrate, 2_500_000);
-                    e.maxFramerate = 24;
-                    if (captureHeight > 720) e.scaleResolutionDownBy = captureHeight / 720.0;
-                } else {
-                    e.maxBitrateBps = maxBitrate;
-                    e.maxFramerate = 30;
+                e.maxBitrateBps = profile.bitrate;
+                e.maxFramerate = profile.fps;
+                if (captureHeight > profile.height) e.scaleResolutionDownBy = captureHeight / (double) profile.height;
+            }
+            if (!sender.setParameters(p)) {
+                // Retain bitrate/frame caps if an encoder rejects a resource preference.
+                p.degradationPreference = null;
+                if (!sender.setParameters(p)) {
+                    Log.w(TAG, "video sender rejected quality limits");
+                    emit(safe(event("error"), "message", "This device couldn't apply the picture-quality limits. Try another quality setting or restart sharing."));
                 }
             }
-            sender.setParameters(p);
         } catch (Throwable t) {
             Log.w(TAG, "bitrate", t);
         }
