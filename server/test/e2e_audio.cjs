@@ -230,6 +230,7 @@ async function receiving(page) {
 
     await host.evaluate(() => document.getElementById('people-open').click());
     await host.locator('#people-list button.chip').filter({ hasText: `Audio ${engine}` }).click();
+    host.once('dialog', dialog => dialog.accept());
     await host.locator('#person-remove').click();
     await viewer.waitForFunction(() => document.getElementById('waiting-text').textContent.includes('removed'));
     assert.equal(await viewer.evaluate(() => sessionStorage.getItem('bx:viewerRoom')), null);
