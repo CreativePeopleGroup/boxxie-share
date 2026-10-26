@@ -4,6 +4,13 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class VideoQualityProfileTest {
+    @Test public void directlyNegotiatedVP8GetsAutoBudgetWithoutAFallbackRestart() {
+        VideoQualityProfile p = VideoQualityProfile.forCodec(true, 1080, 4_000_000, false, "vp8");
+        assertEquals(720, p.height);
+        assertEquals(2_500_000, p.bitrate);
+        assertEquals(24, p.fps);
+        assertEquals(1080, VideoQualityProfile.forCodec(true, 1080, 4_000_000, false, "H264").height);
+    }
     @Test public void autoCannotTurnInto4kOrExceedUploadCeiling() {
         VideoQualityProfile p = new VideoQualityProfile(true, 2160, 25_000_000, false);
         assertTrue(p.automatic);

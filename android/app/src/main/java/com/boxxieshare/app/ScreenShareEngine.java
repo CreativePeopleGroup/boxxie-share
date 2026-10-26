@@ -102,6 +102,8 @@ public final class ScreenShareEngine {
 
     private static final class Viewer {
         PeerConnection pc;
+        RtpSender videoSender;
+        boolean vp8BudgetApplied;
         boolean remoteSet;
         boolean vp8;            // switched to VP8 because the H.264 encoder produced no picture
         int noPictureChecks;    // connected, but no frames encoded yet
@@ -589,7 +591,9 @@ public final class ScreenShareEngine {
                     new RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY, streams));
             pc.addTransceiver(audioTrack,
                     new RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY, streams));
-            limitBitrate(vt.getSender(), vp8);
+            v.videoSender = vt.getSender();
+            v.vp8BudgetApplied = vp8;
+            limitBitrate(v.videoSender, vp8, "");
             pc.createOffer(new SdpAdapter() {
                 @Override
                 public void onCreateSuccess(SessionDescription sdp) {
@@ -671,6 +675,12 @@ public final class ScreenShareEngine {
                 if (mime != null) codec = String.valueOf(mime).replace("video/", "");
             }
         }
+        if (automaticQuality && !v.vp8BudgetApplied && "VP8".equalsIgnoreCase(codec)) {
+            // Some viewers negotiate VP8 directly, without our H.264 fallback.
+            // Apply the budget from the actual codec rather than the offer preference.
+            limitBitrate(v.videoSender, false, codec);
+            v.vp8BudgetApplied = true;
+        }
         boolean connected = "connected".equals(v.ice) || "completed".equals(v.ice);
         if (connected && frames == 0) v.noPictureChecks++;
         else v.noPictureChecks = 0;
@@ -691,10 +701,10 @@ public final class ScreenShareEngine {
         }
     }
 
-    private void limitBitrate(RtpSender sender, boolean vp8) {
+    private void limitBitrate(RtpSender sender, boolean vp8, String codec) {
         try {
             RtpParameters p = sender.getParameters();
-            VideoQualityProfile profile = new VideoQualityProfile(automaticQuality, maxHeight, maxBitrate, vp8);
+            VideoQualityProfile profile = VideoQualityProfile.forCodec(automaticQuality, maxHeight, maxBitrate, vp8, codec);
             p.degradationPreference = automaticQuality
                     ? RtpParameters.DegradationPreference.MAINTAIN_FRAMERATE
                     : RtpParameters.DegradationPreference.BALANCED;

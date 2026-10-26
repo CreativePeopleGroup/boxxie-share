@@ -763,7 +763,6 @@
     document.querySelectorAll("[data-quality]").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.quality === q)));
     $("quality-note").querySelectorAll("[data-quality-note]").forEach(note =>
       note.setAttribute("aria-hidden", String(note.dataset.qualityNote !== q)));
-    if (q === "4k" && Number($("max-viewers").value) > 3) $("max-viewers").value = "3";
   }
   document.querySelectorAll("[data-quality]").forEach((b) => (b.onclick = () => setQuality(b.dataset.quality)));
   document.querySelector('[data-quality="auto"]').hidden = !!NATIVE && !nativeInfo.automaticQuality;

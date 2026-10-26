@@ -80,3 +80,21 @@ References:
 - https://man7.org/linux/man-pages/man8/tc-netem.8.html
 - https://developers.cloudflare.com/realtime/sfu/
 - https://developer.android.com/studio/run/emulator-acceleration
+
+## Capacity and media-cost requirement
+
+The room selector defaults to three viewers and still offers up to eight. Changing
+picture quality must not silently lower a user's selected viewer count. The API's
+fallback default is also three; this does not automatically reduce an open room.
+
+The user requires $0 media-service charges. No SFU is introduced by this update.
+Cloudflare SFU and TURN share a 1,000 GB allowance, then charge for egress. Budget
+alerts do not enforce limits, and stopping new credentials does not stop existing
+relay allocations or guarantee zero overage. An app-side estimate is not a billing
+hard cap. Provider-enforced non-billable limits or a direct-only mode are required
+before promising strictly zero relay costs. Changing current relay availability
+requires an explicit decision because it can prevent VPN/restrictive-network users
+from joining; no live billing/relay setting has been changed here.
+
+Pricing: https://developers.cloudflare.com/realtime/sfu/platform/pricing/
+Budget alerts: https://developers.cloudflare.com/billing/manage/budget-alerts/

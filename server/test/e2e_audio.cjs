@@ -143,6 +143,9 @@ async function mediaProgress(page) {
     await host.unroute('**/app.js');
     await host.locator('#screen-home:not([hidden])').waitFor();
     assert.equal(await host.locator('[data-quality="auto"]').getAttribute('aria-checked'), 'true', 'Supported hosts default to Auto');
+    assert.equal(await host.locator('#max-viewers').inputValue(), '3', 'Room capacity defaults to three viewers');
+    assert.deepEqual(await host.locator('#max-viewers option').evaluateAll(options => options.map(o => o.value)),
+      ['2', '3', '4', '6', '8'], 'Room capacity still offers up to eight viewers');
     assert((await host.locator('#device-info').textContent()).includes('Simulated TV'), 'Account diagnostics identify the reported device');
     // Force an actually late font response, beyond font-display: optional's
     // brief initial window, rather than testing only a warm/fast font load.
@@ -160,6 +163,7 @@ async function mediaProgress(page) {
       'Home card geometry stays stable after startup and font loading');
     console.log(`PASS ${engine}: cold startup sizes TV cards before showing them, without a late font/layout jump`);
     await host.locator('[data-source="screen"]').click();
+    await host.locator('#max-viewers').selectOption('8');
     for (const width of [960, 1280, 1920]) {
       await host.setViewportSize({ width, height: Math.round(width * 9 / 16) });
       await host.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
@@ -189,8 +193,10 @@ async function mediaProgress(page) {
         `${width}px TV: resolution selection keeps card/button positions and dimensions stable`);
       assert.equal(stability.writes.length, 0, 'Resolution changes and unchanged-viewport resize events do not reset TV zoom');
       assert.deepEqual(stability.notes, [['auto'], ['hd'], ['4k'], ['smooth'], ['auto']], 'Only the selected resolution help is exposed');
+      assert.equal(await host.locator('#max-viewers').inputValue(), '8', 'Resolution changes preserve the selected eight-viewer capacity');
     }
     await host.setViewportSize({ width: 1280, height: 720 });
+    await host.locator('#max-viewers').selectOption('3');
     console.log(`PASS ${engine}: repeated resolution changes stay stable across 960/1280/1920 TV widths`);
     await host.locator('[data-quality="smooth"]').click();
     for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 720 }]) {

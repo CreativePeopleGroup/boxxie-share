@@ -5,6 +5,11 @@ final class VideoQualityProfile {
     final boolean automatic;
     final int height, bitrate, fps;
 
+    static VideoQualityProfile forCodec(boolean automatic, int height, int bitrate, boolean forcedVP8, String codec) {
+        return new VideoQualityProfile(automatic, height, bitrate,
+                forcedVP8 || (automatic && "VP8".equalsIgnoreCase(codec)));
+    }
+
     VideoQualityProfile(boolean automatic, int requestedHeight, int requestedBitrate, boolean vp8) {
         this.automatic = automatic;
         int h = requestedHeight > 0 ? requestedHeight : 1080;
