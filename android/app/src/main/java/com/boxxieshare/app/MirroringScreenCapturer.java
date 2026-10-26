@@ -27,7 +27,6 @@ import android.media.projection.MediaProjectionManager;
 import android.os.Build.VERSION;
 import android.os.Build.VERSION_CODES;
 import android.view.Surface;
-import android.annotation.Nullable;
 
 /**
  * An implementation of VideoCapturer to capture the screen content as a video stream.
@@ -55,13 +54,13 @@ final class MirroringScreenCapturer implements VideoCapturer, VideoSink {
 
   private int width;
   private int height;
-  @Nullable private VirtualDisplay virtualDisplay;
-  @Nullable private SurfaceTextureHelper surfaceTextureHelper;
-  @Nullable private CapturerObserver capturerObserver;
+  private VirtualDisplay virtualDisplay;
+  private SurfaceTextureHelper surfaceTextureHelper;
+  private CapturerObserver capturerObserver;
   private long numCapturedFrames;
-  @Nullable private MediaProjection mediaProjection;
+  private MediaProjection mediaProjection;
   private boolean isDisposed;
-  @Nullable private MediaProjectionManager mediaProjectionManager;
+  private MediaProjectionManager mediaProjectionManager;
 
   /**
    * Constructs a new Screen Capturer.
@@ -84,7 +83,6 @@ final class MirroringScreenCapturer implements VideoCapturer, VideoSink {
     }
   }
 
-  @Nullable
   public MediaProjection getMediaProjection() {
     return mediaProjection;
   }
