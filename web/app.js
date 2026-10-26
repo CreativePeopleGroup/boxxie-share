@@ -205,6 +205,7 @@
     showSignin(message);
   }
   $("signout").onclick = async () => {
+    forgetViewerRoom();
     await api("/auth/signout", { method: "POST" });
     signOutLocal();
   };
@@ -243,12 +244,14 @@
     renderAvatar($("me-av"), S.session.user, 0);
     openInbox();
     await loadMe();
+    if (!S.session) return;
     const after = S.after;
     S.after = null;
     if (after && after.device) return showDeviceApproval(after.device);
     if (after && after.pair) return joinAsPhone(after.pair[0], after.pair[1]);
     if (after && after.join) $("join-code").value = formatCode(after.join);
     if (!after && resumeTVRoom()) return;
+    if (!after && resumeViewerRoom()) return;
     show("home");
     if (after && after.join) setTimeout(() => $("join-start").focus(), 60);
   }
@@ -1261,6 +1264,38 @@
     return true;
   }
 
+  // Per-tab room recovery: account credentials stay in the existing session store;
+  // this only remembers where this tab was watching. The server still checks the
+  // account, room lifetime, host approval, lock and removal permissions on rejoin.
+  function rememberViewerRoom() {
+    if (S.role !== "viewer" || !S.code || !S.session) return;
+    try {
+      sessionStorage.setItem("bx:viewerRoom", JSON.stringify({
+        code: S.code, companion: !!S.companion, pin: S.companion ? S.pin : null,
+        userId: S.session.user.id, at: Date.now(),
+      }));
+    } catch {}
+  }
+  function forgetViewerRoom() {
+    try { sessionStorage.removeItem("bx:viewerRoom"); } catch {}
+  }
+  function resumeViewerRoom() {
+    let room;
+    try { room = JSON.parse(sessionStorage.getItem("bx:viewerRoom") || "null"); } catch {}
+    if (!room || !S.session) return false;
+    if (room.userId !== S.session.user.id || !/^[A-Z0-9]{8}$/.test(room.code || "") ||
+        !Number.isFinite(room.at) || Date.now() - room.at > 12 * 60 * 60 * 1000) {
+      forgetViewerRoom();
+      return false;
+    }
+    S.rejoinSince = Date.now();
+    if (room.companion) {
+      if (!/^\d{6}$/.test(room.pin || "")) { forgetViewerRoom(); return false; }
+      joinAsPhone(room.code, room.pin);
+    } else joinRoom(room.code);
+    return true;
+  }
+
   // ----- Android app: whole-screen sharing from the background -----
   // The page hands each viewer to the app's engine; the engine's offers/answers travel over the
   // normal signalling as {ch: "screen"} messages, on a connection separate from the call.
@@ -1470,6 +1505,8 @@
     if (!SERVER) return showError(err, ERRORS.no_server);
     store.set("name", name);
     S.role = "viewer";
+    S.companion = false;
+    S.pin = null;
     S.code = code;
     S.myName = name;
     $("waiting-title").textContent = "Waiting to be let in";
@@ -1483,6 +1520,8 @@
     const name = needName();
     if (!name) return;
     S.role = "viewer";
+    S.companion = false;
+    S.pin = null;
     S.code = cleanCode(code);
     S.myName = name;
     $("waiting-title").textContent = "Waiting to be let in";
@@ -1510,10 +1549,21 @@
   }
 
   // ---------------- connection to server ----------------
+  let connectionEpoch = 0;
+  let connectionPending = false;
   async function connect() {
+    if (!S.role || connectionPending || (S.ws && (S.ws.readyState === 0 || S.ws.readyState === 1))) return;
+    const epoch = ++connectionEpoch;
+    connectionPending = true;
     S.closing = false;
     const ticket = await getTicket();
-    if (!ticket) return failConnect("signed_out");
+    if (epoch !== connectionEpoch) return;
+    connectionPending = false;
+    if (S.closing || !S.role) return;
+    if (!ticket) {
+      if (S.session && S.role === "viewer") return rejoinSoon();
+      return failConnect("signed_out");
+    }
     const q = `ticket=${encodeURIComponent(ticket)}&` + (S.role === "host"
       ? `role=host&token=${encodeURIComponent(S.hostToken)}`
       : S.companion
@@ -1523,29 +1573,35 @@
     try {
       ws = new WebSocket(`${WS_SERVER}/api/rooms/${S.code}/ws?${q}`);
     } catch {
+      if (S.role === "viewer") return rejoinSoon();
       return failConnect("network");
     }
     S.ws = ws;
     let opened = false;
     S.refused = null;
     ws.onopen = () => {
+      if (S.ws !== ws || S.closing) { ws.close(); return; }
       opened = true;
       S.reconnectTries = 0;
       clearInterval(S.pingTimer);
       S.pingTimer = setInterval(() => send({ type: "ping" }), 25000);
     };
     ws.onmessage = (ev) => {
+      if (S.ws !== ws || S.closing) return;
       S.lastHeard = Date.now();
       let m;
       try { m = JSON.parse(ev.data); } catch { return; }
       onServer(m);
     };
     ws.onclose = (ev) => {
-      clearInterval(S.pingTimer);
       if (S.ws !== ws || S.closing) return;
+      clearInterval(S.pingTimer);
       if (S.refused) return failConnect(S.refused);
+      if (S.role === "viewer" && ev.code === 4000) {
+        return endWithMessage("Room opened elsewhere", "This account joined the room in another tab. You can rejoin here when you're ready.");
+      }
       // Friends and paired phones: a locked screen or a signal drop isn't goodbye. Keep coming back.
-      if (S.role === "viewer" && (opened || S.rejoinSince) && ev.code !== 4004 && ev.code !== 4003) return rejoinSoon();
+      if (S.role === "viewer" && ev.code !== 4004 && ev.code !== 4003) return rejoinSoon();
       if (!opened) return failConnect("network");
       if (S.role === "host" && ev.code !== 4004 && ev.code !== 4000 && (S.reconnectTries < 8 || S.nativeSharing)) {
         S.reconnectTries++;
@@ -1583,8 +1639,13 @@
       S.reconnectTries = 0;
       connect();
     } else if (S.ws && S.ws.readyState === 1 && Date.now() - (S.lastHeard || 0) > 45000) {
-      // The phone slept and the connection silently died: close it and come back
-      try { S.ws.close(); } catch {}
+      // A sleeping phone can retain a ghost socket whose close handshake never
+      // finishes. Detach it before retrying; its late events must not affect us.
+      const stale = S.ws;
+      S.ws = null;
+      clearInterval(S.pingTimer);
+      try { stale.close(); } catch {}
+      rejoinSoon();
     }
   }
   document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && checkConnectionNow());
@@ -1597,6 +1658,7 @@
       banner(ERRORS[reason] || ERRORS.network);
       return;
     }
+    if (reason !== "network" && reason !== "signed_out") forgetViewerRoom();
     S.ws = null;
     show("home");
     showError($("join-error"), ERRORS[reason] || ERRORS.network);
@@ -1632,6 +1694,7 @@
           S.myName = m.ownerName || "Guest";
           S.companionOwner = m.ownerId;
         }
+        rememberViewerRoom();
         enterRoom();
         if (S.companion) startCall(); // straight onto the call: that's what this device is for
         return;
@@ -1643,6 +1706,7 @@
         return;
       case "denied":
         if (S.role === "viewer") {
+          forgetViewerRoom();
           const text = { locked: "The host has locked this room, so no one else can join right now.", busy: "Lots of people are waiting to join. Try again in a minute.", removed: "The host removed you from the room.", denied: "The host didn't let you in this time." }[m.reason] || "You can't join this room.";
           endWithMessage("Not let in", text);
         }
@@ -1709,6 +1773,7 @@
         return;
       case "room-closed":
         S.closing = true;
+        forgetViewerRoom();
         forgetTVRoom();
         if (S.role === "host") {
           cleanup();
@@ -1736,6 +1801,7 @@
   function enterRoom() {
     show("room");
     const host = S.role === "host";
+    $("screen-room").classList.toggle("screen-host", host && S.source === "screen");
     $("code-block").hidden = !host;
     $("share-panel").hidden = true;
     setTimeout(showControls, 0);
@@ -2827,6 +2893,8 @@
 
   function cleanup() {
     S.closing = true;
+    connectionEpoch++;
+    connectionPending = false;
     clearTimeout(S.rejoinTimer);
     S.rejoinSince = null;
     clearInterval(endTimer);
@@ -2867,6 +2935,8 @@
     S.wakeLock = null;
   }
   function leave() {
+    if (S.role === "viewer" && S.code) $("join-code").value = formatCode(S.code);
+    forgetViewerRoom();
     forgetTVRoom();
     cleanup();
     $("invite-panel").hidden = true;

@@ -21,9 +21,24 @@ async function signedInPage(browser, name, options = {}) {
   assert(response.ok, `Create test account: ${response.status}`);
   const session = await response.json();
   assert(session.token && session.user, 'Test account has a session');
-  const context = await browser.newContext({ ...options, extraHTTPHeaders: { 'X-Test-IP': ip } });
-  await context.addInitScript(({ token, user }) => {
-    localStorage.setItem('bx:session', JSON.stringify({ token, user }));
+  const context = await browser.newContext({ ...options, extraHTTPHeaders: { 'X-Test-IP': ip },
+    storageState: { cookies: [], origins: [{ origin: new URL(BASE).origin,
+      localStorage: [{ name: 'bx:session', value: JSON.stringify({ token: session.token, user: session.user }) }] }] },
+  });
+  // Seed credentials once, not on every navigation: refresh tests must exercise
+  // the application's real session persistence rather than repair it in a fixture.
+  await context.route('https://fonts.googleapis.com/**', route => route.abort());
+  await context.route('https://fonts.gstatic.com/**', route => route.abort());
+  await context.addInitScript(() => {
+    const NativeSocket = window.WebSocket;
+    window.__testSockets = [];
+    window.WebSocket = new Proxy(NativeSocket, {
+      construct(Target, args) {
+        const socket = new Target(...args);
+        window.__testSockets.push(socket);
+        return socket;
+      },
+    });
     const NativePeer = window.RTCPeerConnection;
     window.__audioTestPeers = [];
     window.RTCPeerConnection = new Proxy(NativePeer, {
@@ -35,7 +50,7 @@ async function signedInPage(browser, name, options = {}) {
         return peer;
       },
     });
-  }, { token: session.token, user: session.user });
+  });
   return context.newPage();
 }
 
@@ -100,8 +115,33 @@ async function receiving(page) {
     assert((await host.evaluate(() => window.__nativeCalls)).includes('tv-capture-test'),
       'TV sound capture control calls the Android bridge');
     console.log('PASS TV sound capture control reaches the native bridge (simulated)');
+    async function checkButtonGroups() {
+      const groups = await host.evaluate(() => [
+        ['test-sound', 'test-tv-capture'], ['ctl-reshare', 'ctl-stopshare'],
+      ].map(ids => ids.map(id => {
+        const box = document.getElementById(id).getBoundingClientRect();
+        return { id, width: box.width, height: box.height, left: box.left, top: box.top };
+      })));
+      for (const [a, b] of groups) {
+        assert(a.width > 0 && a.height > 0, `${a.id} is laid out`);
+        assert(Math.abs(a.width - b.width) < 1 && Math.abs(a.height - b.height) < 1,
+          `Matched control dimensions: ${JSON.stringify([a, b])}`);
+      }
+      assert(Math.abs(groups[0][0].left - groups[0][1].left) < 1, 'Sound buttons align vertically');
+      assert(Math.abs(groups[1][0].top - groups[1][1].top) < 1, 'Sharing buttons align horizontally');
+    }
+    await checkButtonGroups();
+    await host.screenshot({ path: `/tmp/boxxie-ui-tv-${engine}.png` });
+    await host.setViewportSize({ width: 390, height: 844 });
+    await host.evaluate(() => document.documentElement.classList.remove('tv'));
+    await checkButtonGroups();
+    await host.setViewportSize({ width: 1280, height: 720 });
+    await host.evaluate(() => document.documentElement.classList.add('tv'));
+    console.log(`PASS ${engine}: matched button dimensions and alignment at TV and phone widths`);
     try {
       await receiving(viewer);
+      await viewer.setViewportSize({ width: 390, height: 844 });
+      await viewer.screenshot({ path: `/tmp/boxxie-ui-phone-${engine}.png` });
     } catch (error) {
       console.error('Sender connection details', JSON.stringify(await host.evaluate(async () =>
         Promise.all(window.__audioTestPeers.map(async p => ({
@@ -138,6 +178,64 @@ async function receiving(page) {
     await host.locator('#stage').dispatchEvent('mousemove');
     await host.locator('#ctl-reshare').click();
     await receiving(viewer);
+    // A refresh must restore the same authenticated viewer without another approval,
+    // including a locked room. Do not inject credentials again during reload.
+    const tokenBefore = await viewer.evaluate(() => JSON.parse(localStorage.getItem('bx:session')).token);
+    await host.evaluate(() => document.getElementById('lock-room').click());
+    await host.waitForFunction(() => document.getElementById('lock-room').getAttribute('aria-pressed') === 'true');
+    await viewer.reload();
+    await receiving(viewer);
+    assert.equal(await viewer.evaluate(() => JSON.parse(localStorage.getItem('bx:session')).token), tokenBefore);
+    assert.equal(await host.locator('#request-list .allow').count(), 0, 'Refresh needs no new approval');
+    assert.equal(await host.locator('#viewer-health li').count(), 1, 'Refreshed viewer appears only once');
+    console.log(`PASS ${engine}: refresh restores account and approved room while locked`);
+
+    // Exercise a failed ticket fetch during a disconnect, then simultaneous wake/online events.
+    await viewer.route('**/api/ticket', route => route.abort());
+    const ticketFailed = viewer.waitForEvent('requestfailed', {
+      predicate: request => new URL(request.url()).pathname === '/api/ticket', timeout: 15000,
+    });
+    await viewer.evaluate(() => window.__testSockets.filter(w =>
+      w.url.includes('/api/rooms/') && w.readyState === 1).forEach(w => w.close()));
+    await ticketFailed;
+    assert(await viewer.locator('#screen-room').isVisible(), 'A network error must not log the viewer out');
+    await viewer.unroute('**/api/ticket');
+    await viewer.evaluate(() => {
+      window.dispatchEvent(new Event('online'));
+      window.dispatchEvent(new Event('pageshow'));
+    });
+    await receiving(viewer);
+    assert.equal(await host.locator('#viewer-health li').count(), 1, 'Reconnect does not duplicate the viewer');
+    console.log(`PASS ${engine}: network drop and failed ticket fetch recover without duplicate connections`);
+
+    await viewer.evaluate(() => {
+      const now = Date.now;
+      Date.now = () => now() + 60000;
+      window.dispatchEvent(new Event('pageshow'));
+      Date.now = now;
+    });
+    await receiving(viewer);
+    assert.equal(await host.locator('#viewer-health li').count(), 1);
+    console.log(`PASS ${engine}: returning to a stale socket reconnects without waiting for its close handshake`);
+
+    await viewer.evaluate(() => document.getElementById('leave').click());
+    await viewer.reload();
+    await viewer.locator('#screen-home:not([hidden])').waitFor();
+    assert.equal(await viewer.evaluate(() => sessionStorage.getItem('bx:viewerRoom')), null,
+      'Explicit leave must not auto-rejoin');
+    await viewer.locator('#join-code').fill(code);
+    await viewer.locator('#join-start').click();
+    await receiving(viewer);
+    console.log(`PASS ${engine}: explicit leave stays out after reload; manual rejoin still works`);
+
+    await host.evaluate(() => document.getElementById('people-open').click());
+    await host.locator('#people-list button.chip').filter({ hasText: `Audio ${engine}` }).click();
+    await host.locator('#person-remove').click();
+    await viewer.waitForFunction(() => document.getElementById('waiting-text').textContent.includes('removed'));
+    assert.equal(await viewer.evaluate(() => sessionStorage.getItem('bx:viewerRoom')), null);
+    await viewer.reload();
+    await viewer.locator('#screen-home:not([hidden])').waitFor();
+    console.log(`PASS ${engine}: removed viewer is not silently restored on refresh`);
     assert.deepEqual(errors, [], 'No uncaught browser errors');
   } finally {
     if (viewerBrowser) await viewerBrowser.close();

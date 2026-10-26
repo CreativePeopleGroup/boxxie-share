@@ -33,7 +33,7 @@ jobs:
           npm install --no-save --package-lock=false playwright@1.62.1
           npx playwright install --with-deps chromium ${{ matrix.browser }}
       - name: Test received audio, playback refusal and sharing restart
-        timeout-minutes: 3
+        timeout-minutes: 5
         working-directory: server
         env:
           BOXXIE_BROWSER: ${{ matrix.browser }}
@@ -46,3 +46,10 @@ jobs:
             sleep 1
           done
           node test/e2e_audio.cjs
+      - name: Save TV and phone layout previews
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BoxxieShare-layout-${{ matrix.browser }}
+          path: /tmp/boxxie-ui-*.png
+          if-no-files-found: ignore
