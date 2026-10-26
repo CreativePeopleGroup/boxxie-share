@@ -94,9 +94,9 @@ jobs:
           echo "Verifying APKs with $signer"
           "$signer" verify --print-certs "$RUNNER_TEMP/previous-BoxxieShare.apk" > "$RUNNER_TEMP/previous-certificate.txt"
           "$signer" verify --print-certs BoxxieShare.apk > "$RUNNER_TEMP/candidate-certificate.txt"
-          previous_cert="$(awk -F': ' '/certificate SHA-256 digest:/{print $2; exit}' "$RUNNER_TEMP/previous-certificate.txt")"
-          candidate_cert="$(awk -F': ' '/certificate SHA-256 digest:/{print $2; exit}' "$RUNNER_TEMP/candidate-certificate.txt")"
-          if [ -z "$previous_cert" ] || [ -z "$candidate_cert" ]; then
+          previous_cert="$(awk -F': ' '/certificate SHA-256 digest:/{print $NF; exit}' "$RUNNER_TEMP/previous-certificate.txt")"
+          candidate_cert="$(awk -F': ' '/certificate SHA-256 digest:/{print $NF; exit}' "$RUNNER_TEMP/candidate-certificate.txt")"
+          if ! [[ "$previous_cert" =~ ^[[:xdigit:]]{64}$ ]] || ! [[ "$candidate_cert" =~ ^[[:xdigit:]]{64}$ ]]; then
             echo "::error::Could not extract APK signing certificate fingerprints."
             sed -E 's/:.*/: [redacted]/' "$RUNNER_TEMP/previous-certificate.txt" "$RUNNER_TEMP/candidate-certificate.txt"
             exit 1
