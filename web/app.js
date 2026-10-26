@@ -16,6 +16,7 @@
   // Picture quality. Bitrate is per friend, sent from the host's home connection.
   // If the connection can't keep up, WebRTC steps the picture down automatically.
   const QUALITY = {
+    smooth: { label: "Smooth 720p", height: 720, width: 1280, maxBitrate: 2_500_000 },
     hd: { label: "HD 1080p", height: 1080, width: 1920, maxBitrate: 8_000_000 },
     "4k": { label: "4K Ultra HD", height: 2160, width: 3840, maxBitrate: 25_000_000 },
   };
@@ -64,7 +65,7 @@
   const S = {
     role: null, // "host" | "viewer"
     source: "file", // host: "file" | "screen"
-    quality: "hd", // host: "hd" | "4k"
+    quality: "hd", // host: "smooth" | "hd" | "4k"
     capture: null, // host: stream captured from the film player
     code: null,
     hostToken: null,
@@ -735,7 +736,9 @@
     document.querySelectorAll("[data-quality]").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.quality === q)));
     $("quality-note").textContent = q === "4k"
       ? "4K needs about 25 Mbps of upload for each friend, so it suits 1–2 friends on full-fibre broadband, with a 4K film or screen. If your connection can't keep up, the picture steps down by itself."
-      : "Sharp on any TV and works on most home broadband. About 8 Mbps of upload per friend.";
+      : q === "smooth"
+        ? "Uses up to 2.5 Mbps of video upload per friend, plus sound and network overhead. Try this for remote viewers, VPNs or a choppy picture."
+        : "Up to 8 Mbps of video upload per friend, plus sound and network overhead. Choose Smooth 720p if the picture is choppy.";
     if (q === "4k" && Number($("max-viewers").value) > 3) $("max-viewers").value = "3";
   }
   document.querySelectorAll("[data-quality]").forEach((b) => (b.onclick = () => setQuality(b.dataset.quality)));
@@ -1366,17 +1369,32 @@
     if (now - (screenRestartAt.get(sp.from) || 0) < 30000) return;
     screenRestartAt.set(sp.from, now);
     closeScreenPeer(sp.from);
+    $("stage-empty-text").textContent = "Reconnecting to the TV's picture…";
     send({ type: "signal", to: sp.from, data: { ch: "screen", restart: true } });
   }
   async function screenDiag(sp) {
     if (screenPeers.get(sp.from) !== sp) return;
     let frames = 0, bytes = 0, audioBytes = 0;
+    let route = "", fps = null, roundTrip = null;
     const mine = new Set(), theirs = new Set();
     try {
-      (await sp.pc.getStats()).forEach((r) => {
+      const report = await sp.pc.getStats();
+      let pairId;
+      report.forEach(r => { if (r.type === "transport" && r.selectedCandidatePairId) pairId = r.selectedCandidatePairId; });
+      const pair = pairId ? report.get(pairId) : [...report.values()].find(r =>
+        r.type === "candidate-pair" && r.state === "succeeded" && r.nominated);
+      if (pair) {
+        const local = report.get(pair.localCandidateId), remote = report.get(pair.remoteCandidateId);
+        const relay = [local, remote].some(c => c && c.candidateType === "relay");
+        const protocol = local && (local.relayProtocol || local.protocol);
+        route = `${relay ? "relay" : "direct"}${protocol ? " " + protocol.toUpperCase() : ""}`;
+        if (typeof pair.currentRoundTripTime === "number") roundTrip = Math.round(pair.currentRoundTripTime * 1000);
+      }
+      report.forEach((r) => {
         if (r.type === "inbound-rtp" && r.kind === "video") {
           frames += r.framesDecoded || 0;
           bytes += r.bytesReceived || 0;
+          if (typeof r.framesPerSecond === "number") fps = r.framesPerSecond;
         }
         if (r.type === "inbound-rtp" && r.kind === "audio") {
           audioBytes += r.bytesReceived || 0;
@@ -1394,6 +1412,12 @@
     const el = $("screen-diag");
     const ice = sp.pc.iceConnectionState;
     const now = Date.now();
+    const elapsed = sp.sampleAt ? (now - sp.sampleAt) / 1000 : 0;
+    const mbps = elapsed > 0 ? Math.max(0, bytes - (sp.sampleBytes || 0)) * 8 / elapsed / 1e6 : null;
+    sp.sampleAt = now;
+    sp.sampleBytes = bytes;
+    sp.networkDetails = [route, roundTrip === null ? "" : `${roundTrip} ms round trip`,
+      mbps === null ? "" : `${mbps.toFixed(2)} Mbps received`, fps === null ? "" : `${Math.round(fps)} fps`].filter(Boolean).join(" · ");
     if (ice === "disconnected" || ice === "failed") {
       if (!sp.disconnectedAt) sp.disconnectedAt = now;
       if (ice === "failed" || now - sp.disconnectedAt > 10000) restartScreenPeer(sp);
@@ -1430,7 +1454,7 @@
         return;
       }
       const small = document.createElement("small");
-      small.textContent = `Network: ${ice} · sound received ${Math.round(audioBytes / 1024)} KB · level ${(sp.level || 0).toFixed(3)} · ${filmVideo.muted ? "muted here" : "not muted"} · picture ${frames} frames`;
+      small.textContent = `Network: ${ice}${sp.networkDetails ? " · " + sp.networkDetails : ""} · sound received ${Math.round(audioBytes / 1024)} KB · level ${(sp.level || 0).toFixed(3)} · ${filmVideo.muted ? "muted here" : "not muted"} · picture ${frames} frames`;
       el.append(small);
       el.hidden = false;
       return;
@@ -2465,7 +2489,9 @@
         !view || filmVideo.srcObject !== view || !filmVideo.paused ||
         !view.getTracks().some(t => t.readyState === "live") || viewerPlayPending === view) return;
     viewerPlayPending = view;
-    Promise.resolve().then(() => filmVideo.play()).catch(() => {
+    Promise.resolve().then(() => {
+      if (filmVideo.srcObject === view && S.role === "viewer" && !S.closing) return filmVideo.play();
+    }).catch(() => {
       if (filmVideo.srcObject === view && !S.closing) $("sound-on").hidden = false;
     }).finally(() => {
       if (viewerPlayPending === view) viewerPlayPending = null;

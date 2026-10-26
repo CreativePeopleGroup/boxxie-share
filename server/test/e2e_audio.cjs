@@ -120,7 +120,21 @@ async function mediaProgress(page) {
     });
     await host.goto(BASE);
     await host.locator('[data-source="screen"]').click();
+    await host.locator('[data-quality="smooth"]').click();
+    for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 720 }]) {
+      await host.setViewportSize(viewport);
+      await host.evaluate(phone => document.documentElement.classList.toggle('tv', !phone), viewport.width < 600);
+      const boxes = await host.locator('[data-quality]').evaluateAll(buttons => buttons.map(b => {
+        const r = b.getBoundingClientRect(); return { w: r.width, h: r.height, y: r.top };
+      }));
+      assert(boxes.every(b => b.w > 0 && Math.abs(b.w - boxes[0].w) < 1 && Math.abs(b.h - boxes[0].h) < 1 && Math.abs(b.y - boxes[0].y) < 1),
+        'Quality buttons have matching dimensions and alignment');
+      await host.screenshot({ path: `/tmp/boxxie-ui-quality-${viewport.width}-${engine}.png` });
+    }
     await host.locator('#host-start').click();
+    assert.deepEqual(await host.evaluate(() => window.__lastShareConfig.quality),
+      { label: 'Smooth 720p', height: 720, width: 1280, maxBitrate: 2500000 },
+      'Smooth profile passes a 720p / 2.5 Mbps limit to the native engine');
     await host.locator('#code-tiles .tile').first().waitFor({ state: 'attached' });
     const code = (await host.locator('#code-tiles .tile').allTextContents()).join('');
     await viewer.goto(`${BASE}#join=${code}`);
@@ -185,6 +199,10 @@ async function mediaProgress(page) {
       return !film.paused && !film.muted && document.getElementById('sound-on').hidden;
     });
     console.log(`PASS ${engine}: user gesture starts unmuted playback`);
+    await viewer.evaluate(() => document.getElementById('viewer-status').click());
+    await viewer.waitForFunction(() => document.getElementById('screen-diag').textContent.includes('Mbps received'));
+    await viewer.evaluate(() => document.getElementById('viewer-status').click());
+    console.log(`PASS ${engine}: viewer network diagnostics report measured receive bitrate`);
 
     const tracksBefore = await viewer.evaluate(() => document.getElementById('film').srcObject.getTracks().map(t => t.id).sort());
     const addsBefore = await host.evaluate(() => window.__nativeCalls.filter(c => c.startsWith('add:')).length);

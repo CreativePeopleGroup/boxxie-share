@@ -75,3 +75,25 @@ Tests pause and resume the simulated source on the same tracks, interrupt viewer
 playback, require new decoded frames and audio energy, then simulate failed media
 ICE while the signalling socket remains connected. Physical stick pause/resume
 still needs verification after the web update.
+
+## Outside-home picture report
+
+The user reports choppy picture for an external Wi-Fi viewer while the stick's
+VPN was enabled. A supplied 7.65-second WhatsApp recording shows playback and a
+return to the player menu; its recompressed 384x832 capture does not establish the
+original live frame rate or end-to-end latency. The deployed relay health endpoint
+reports Cloudflare credentials are configured; this does not prove the route or
+throughput of the reported session.
+
+HD's video bitrate cap is 8 Mbps per viewer, with a separate outgoing stream for
+each viewer. Add a selectable Smooth 720p profile capped at 2.5 Mbps video per
+viewer, preserving HD as the default. Existing Android 1.0.24 already accepts the
+profile's height and bitrate configuration, so this option needs a website update,
+not a new APK. These are caps, not measured usage or promised upload requirements.
+
+Phone diagnostics now expose measured received video bitrate and, when available,
+selected candidate route/transport, round-trip time and decoded frame rate. No
+candidate addresses or relay credentials are displayed. Compare the next remote
+session on Smooth 720p and, if practical, a VPN-bypassed Boxxie session before
+claiming which network component caused the problem. Browser tests use local ICE
+and cannot validate an outside-home/VPN route or stick encoding performance.

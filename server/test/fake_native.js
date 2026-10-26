@@ -23,6 +23,7 @@
     screenShareInfo: () => JSON.stringify({ available: true, audio: true, sdk: 34 }),
     startScreenShare: (cfg) => {
       window.__nativeCalls.push("start");
+      window.__lastShareConfig = JSON.parse(cfg);
       try { ice = JSON.parse(cfg).iceServers || []; } catch (e) {}
       if (window.__denyNext) { window.__denyNext = false; return emit({ type: "denied" }); }
       stream = makeStream(); session = Math.random().toString(36).slice(2);
