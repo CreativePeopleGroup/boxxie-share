@@ -528,6 +528,13 @@ public final class ScreenShareEngine {
     /** Report each friend's connection to the page, and switch a friend to VP8 if H.264 sends nothing. */
     private void checkViewers() {
         if (!sharing) return;
+        try {
+            emit(event("audio-health").put("audioState", audioState)
+                    .put("capturedPcmBytes", capturedPcmBytes)
+                    .put("capturedPeak", capturedPeak)
+                    .put("outgoingPeak", outgoingPeak)
+                    .put("captureError", captureError));
+        } catch (Exception ignored) {}
         for (Map.Entry<String, Viewer> e : new ArrayList<>(viewers.entrySet())) {
             final String id = e.getKey();
             final Viewer v = e.getValue();
