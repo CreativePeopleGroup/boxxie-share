@@ -8,6 +8,11 @@ on:
     branches: [main]
     paths: ["android/**", ".github/workflows/build-android.yml"]
   workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish as latest release after signing verification'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -37,7 +42,7 @@ jobs:
           echo "App will open: $URL"
           echo "value=$URL" >> "$GITHUB_OUTPUT"
 
-      - name: Set up release signing key (optional)
+      - name: Set up stable release signing key
         env:
           KEYSTORE_B64: ${{ secrets.BOXXIE_KEYSTORE_BASE64 }}
         run: |
@@ -46,7 +51,8 @@ jobs:
             echo "BOXXIE_KEYSTORE_PATH=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
             echo "Signing with your release key."
           else
-            echo "::notice::No release key set. The app is signed with a temporary key: fine for installing yourself, not for app stores. See README."
+            echo "::error::A stable release signing key is required for in-place updates."
+            exit 1
           fi
 
       - name: Build
@@ -78,10 +84,40 @@ jobs:
             echo "::warning::BoxxieShare-GooglePlay.aab is signed with a temporary key, so Google Play will refuse it. Add your upload key (README: Google Play) and run this again."
           fi
 
+      - name: Verify signing certificate matches the current installed release
+        run: |
+          curl --fail --location --retry 3 \
+            "https://github.com/${{ github.repository }}/releases/latest/download/BoxxieShare.apk" \
+            --output "$RUNNER_TEMP/previous-BoxxieShare.apk"
+          signer="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
+          test -n "$signer"
+          previous_cert="$("$signer" verify --print-certs "$RUNNER_TEMP/previous-BoxxieShare.apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
+          candidate_cert="$("$signer" verify --print-certs BoxxieShare.apk | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
+          test -n "$previous_cert"
+          {
+            echo "Previous release certificate SHA-256: $previous_cert"
+            echo "Candidate certificate SHA-256: $candidate_cert"
+          } | tee signing-verification.txt
+          if [ "$previous_cert" != "$candidate_cert" ]; then
+            echo "::error::Signing certificates differ. Do not publish this APK as an in-place update."
+            exit 1
+          fi
+          previous_version="$(curl --fail --silent --location --retry 3 \
+            "https://github.com/${{ github.repository }}/releases/latest/download/version.json" | jq -r .versionCode)"
+          candidate_version="$(jq -r .versionCode version.json)"
+          if ! [ "$candidate_version" -gt "$previous_version" ]; then
+            echo "::error::The update version must be higher than the current release."
+            exit 1
+          fi
+          echo "Signing certificate matches: Android can accept this as an update to the current release."
+
       - uses: actions/upload-artifact@v4
         with:
           name: BoxxieShare-apk
-          path: BoxxieShare.apk
+          path: |
+            BoxxieShare.apk
+            version.json
+            signing-verification.txt
 
       # Download this from the run's page and upload it in Google Play Console.
       - uses: actions/upload-artifact@v4
@@ -90,6 +126,7 @@ jobs:
           path: BoxxieShare-GooglePlay.aab
 
       - name: Publish release
+        if: github.event_name != 'workflow_dispatch' || inputs.publish
         uses: softprops/action-gh-release@v2
         with:
           tag_name: android-1.0.${{ github.run_number }}
