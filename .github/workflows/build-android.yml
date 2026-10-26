@@ -89,11 +89,18 @@ jobs:
           curl --fail --location --retry 3 \
             "https://github.com/${{ github.repository }}/releases/latest/download/BoxxieShare.apk" \
             --output "$RUNNER_TEMP/previous-BoxxieShare.apk"
-          signer="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
-          test -n "$signer"
-          previous_cert="$("$signer" verify --print-certs "$RUNNER_TEMP/previous-BoxxieShare.apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
-          candidate_cert="$("$signer" verify --print-certs BoxxieShare.apk | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
-          test -n "$previous_cert"
+          signer="$(find -L "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
+          if [ -z "$signer" ]; then echo "::error::Android apksigner tool was not found."; exit 1; fi
+          echo "Verifying APKs with $signer"
+          "$signer" verify --print-certs "$RUNNER_TEMP/previous-BoxxieShare.apk" > "$RUNNER_TEMP/previous-certificate.txt"
+          "$signer" verify --print-certs BoxxieShare.apk > "$RUNNER_TEMP/candidate-certificate.txt"
+          previous_cert="$(awk -F': ' '/certificate SHA-256 digest:/{print $2; exit}' "$RUNNER_TEMP/previous-certificate.txt")"
+          candidate_cert="$(awk -F': ' '/certificate SHA-256 digest:/{print $2; exit}' "$RUNNER_TEMP/candidate-certificate.txt")"
+          if [ -z "$previous_cert" ] || [ -z "$candidate_cert" ]; then
+            echo "::error::Could not extract APK signing certificate fingerprints."
+            sed -E 's/:.*/: [redacted]/' "$RUNNER_TEMP/previous-certificate.txt" "$RUNNER_TEMP/candidate-certificate.txt"
+            exit 1
+          fi
           {
             echo "Previous release certificate SHA-256: $previous_cert"
             echo "Candidate certificate SHA-256: $candidate_cert"
