@@ -50,7 +50,15 @@
   }
   if (isTV) {
     fitTV();
-    addEventListener("resize", fitTV);
+    let fittedWidth = innerWidth, fittedHeight = innerHeight;
+    addEventListener("resize", () => {
+      // Some TV WebViews notify resize after content/focus changes even when
+      // the viewport is unchanged. Do not reset the fitted zoom for those.
+      if (innerWidth === fittedWidth && innerHeight === fittedHeight) return;
+      fittedWidth = innerWidth;
+      fittedHeight = innerHeight;
+      fitTV();
+    });
   }
 
   // ---------------- tiny storage helpers (never required to work) ----------------
@@ -732,14 +740,26 @@
   }
   document.querySelectorAll("[data-source]").forEach((b) => (b.onclick = () => setSource(b.dataset.source)));
   setSource(canHost ? "file" : "screen");
+  const qualityNotes = {
+    "4k": "4K needs about 25 Mbps of upload for each friend, so it suits 1–2 friends on full-fibre broadband, with a 4K film or screen. If your connection can't keep up, the picture steps down by itself.",
+    smooth: "Uses up to 2.5 Mbps of video upload per friend, plus sound and network overhead. Try this for remote viewers, VPNs or a choppy picture.",
+    hd: "Up to 8 Mbps of video upload per friend, plus sound and network overhead. Choose Smooth 720p if the picture is choppy.",
+  };
+  // Stack the notes in the same grid cell. All contribute their natural height,
+  // so the longest note reserves space without guessing a fixed line count.
+  for (const [q, text] of Object.entries(qualityNotes)) {
+    const note = document.createElement("span");
+    note.dataset.qualityNote = q;
+    note.textContent = text;
+    note.setAttribute("aria-hidden", "true");
+    $("quality-note").append(note);
+  }
   function setQuality(q) {
+    if (!QUALITY[q]) return;
     S.quality = q;
     document.querySelectorAll("[data-quality]").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.quality === q)));
-    $("quality-note").textContent = q === "4k"
-      ? "4K needs about 25 Mbps of upload for each friend, so it suits 1–2 friends on full-fibre broadband, with a 4K film or screen. If your connection can't keep up, the picture steps down by itself."
-      : q === "smooth"
-        ? "Uses up to 2.5 Mbps of video upload per friend, plus sound and network overhead. Try this for remote viewers, VPNs or a choppy picture."
-        : "Up to 8 Mbps of video upload per friend, plus sound and network overhead. Choose Smooth 720p if the picture is choppy.";
+    $("quality-note").querySelectorAll("[data-quality-note]").forEach(note =>
+      note.setAttribute("aria-hidden", String(note.dataset.qualityNote !== q)));
     if (q === "4k" && Number($("max-viewers").value) > 3) $("max-viewers").value = "3";
   }
   document.querySelectorAll("[data-quality]").forEach((b) => (b.onclick = () => setQuality(b.dataset.quality)));
