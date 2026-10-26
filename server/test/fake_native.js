@@ -14,7 +14,11 @@
     let seed = 12345;
     timer = setInterval(() => { if (playbackPaused) return; n++;
       if (window.__networkTest) {
-        for (let i = 0; i < pixels.data.length; i += 4) {
+        // A persistent textured scene with one moving band; replacing every
+        // pixel with independent noise is an unrepresentative worst-case codec load.
+        const first = ((n - 1) * 16) % 160;
+        for (let y = 0; y < 90; y++) for (let x = first; x < first + 16; x++) {
+          const i = (y * 160 + x) * 4;
           seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
           pixels.data[i] = seed & 255; pixels.data[i + 1] = (seed >>> 8) & 255;
           pixels.data[i + 2] = (seed >>> 16) & 255; pixels.data[i + 3] = 255;

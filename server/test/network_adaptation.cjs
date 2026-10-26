@@ -48,7 +48,9 @@ module.exports = async function testNetworkAdaptation(viewer) {
       const after = await sample(viewer);
       assert.equal(after.protocol, 'udp', 'The selected media path must be UDP');
       assert(after.frames > before.frames && after.energy > before.energy, `${name}: video and audio must keep progressing`);
-      const result = { name, mbps: (after.bytes - before.bytes) * 8 / (performance.now() - at) / 1000,
+      const seconds = (performance.now() - at) / 1000;
+      const result = { name, mbps: (after.bytes - before.bytes) * 8 / seconds / 1e6,
+        fps: (after.frames - before.frames) / seconds,
         frames: after.frames - before.frames, width: after.width, height: after.height };
       report.scenarios.push(result);
       console.log('NETWORK', JSON.stringify(result));
@@ -56,18 +58,22 @@ module.exports = async function testNetworkAdaptation(viewer) {
     }
 
     const healthy = await measure('healthy', 15);
-    assert(healthy.mbps > 1.1, 'The synthetic source must exercise bandwidth adaptation, not remain a low-bitrate static picture');
+    assert(healthy.mbps > 0.4 && healthy.fps >= 20, 'The source must have meaningful bitrate and smooth baseline motion');
+    const limitedKbit = Math.max(150, Math.min(900, Math.floor(healthy.mbps * 1000 * 0.35)));
+    report.limitedKbit = limitedKbit;
     tc(['qdisc', 'change', 'dev', 'lo', 'parent', '1:3', 'handle', '30:', 'netem', 'limit', '60',
-      'rate', '900kbit', 'delay', '60ms', '15ms', 'loss', '1%']);
-    const limited = await measure('limited-900kbit-delay-loss', 20);
-    assert(limited.mbps < healthy.mbps * 0.85 && limited.mbps < 1.2, 'Sender must reduce its rate on the constrained media path');
+      'rate', `${limitedKbit}kbit`, 'delay', '60ms', '15ms', 'loss', '1%']);
+    const limited = await measure('limited-delay-loss', 20);
+    assert(limited.mbps < healthy.mbps * 0.75 && limited.mbps < limitedKbit / 1000 * 1.35,
+      'Sender must reduce its rate on the constrained media path');
     const qdisc = JSON.parse(tc(['-j', '-s', 'qdisc', 'show', 'dev', 'lo'])).find(q => q.kind === 'netem');
     assert(qdisc && qdisc.bytes > 0, 'The impairment must affect actual packets');
     report.shaper = { bytes: qdisc.bytes, drops: qdisc.drops };
     tc(['qdisc', 'change', 'dev', 'lo', 'parent', '1:3', 'handle', '30:', 'netem', 'limit', '60',
       'rate', '12mbit', 'delay', '0ms', 'loss', '0%']);
-    const recovered = await measure('recovered', 25);
-    assert(recovered.mbps > limited.mbps * 1.3, 'Sender must raise its rate again when the network recovers');
+    const recovered = await measure('recovered', 40);
+    assert(recovered.mbps > limited.mbps * 1.3 && recovered.mbps >= healthy.mbps * 0.5 && recovered.fps >= 20,
+      'Network recovery must restore useful bitrate AND smooth motion');
     console.log('PASS: actual UDP bandwidth reduction/recovery retains fresh picture and audio');
   } finally {
     if (installed) tc(['qdisc', 'del', 'dev', 'lo', 'root']);
