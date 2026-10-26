@@ -111,3 +111,19 @@ shrink. Bundle the same Inter Latin variable font and its OFL locally, preload i
 and use optional font display to avoid a late swap. The offline shell includes
 both startup assets. Cold-load tests hold app.js, verify the uninitialised home is
 hidden, then compare card geometry before/after fonts settle.
+
+## Resolution selection stability
+
+The user reports that selecting picture resolution makes the TV controls grow and
+then resize. Locally, HD/4K/Smooth selection changed the host card height by up to
+36 pixels at a 1280x720 viewport because each help paragraph had a different
+natural height. TV resize handling also reset fitted zoom on every resize event,
+even with unchanged viewport dimensions.
+
+Stack all quality notes in one grid cell so the longest reserves its natural
+height; show and expose only the selected note. Ignore resize events when viewport
+width and height have not changed, while retaining fitting on actual resizes.
+Frame-by-frame geometry checks cover repeated profile switches at 960x540,
+1280x720 and 1920x1080, including unchanged-viewport resize notifications. Local
+checks show constant card/button bounds and no zoom writes during selection.
+The reported stick behaviour still needs physical verification after deployment.

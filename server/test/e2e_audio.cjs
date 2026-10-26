@@ -156,6 +156,38 @@ async function mediaProgress(page) {
       'Home card geometry stays stable after startup and font loading');
     console.log(`PASS ${engine}: cold startup sizes TV cards before showing them, without a late font/layout jump`);
     await host.locator('[data-source="screen"]').click();
+    for (const width of [960, 1280, 1920]) {
+      await host.setViewportSize({ width, height: Math.round(width * 9 / 16) });
+      await host.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      const stability = await host.evaluate(async () => {
+        const root = document.documentElement;
+        const elements = [...document.querySelectorAll('.home-grid > .card, [data-source], [data-quality], #max-viewers, #host-start, #join-start')];
+        const bounds = () => elements.map(el => {
+          const r = el.getBoundingClientRect(); return [r.x, r.y, r.width, r.height];
+        });
+        const initial = bounds(), frames = [], writes = [], notes = [];
+        const observer = new MutationObserver(records => writes.push(...records.map(r => r.oldValue)));
+        observer.observe(root, { attributes: true, attributeFilter: ['style'], attributeOldValue: true });
+        for (const q of ['hd', '4k', 'smooth', 'hd']) {
+          document.querySelector(`[data-quality="${q}"]`).click();
+          // Reproduce content-triggered TV WebView resize notifications.
+          window.dispatchEvent(new Event('resize'));
+          notes.push([...document.querySelectorAll('[data-quality-note][aria-hidden="false"]')].map(n => n.dataset.qualityNote));
+          for (let i = 0; i < 4; i++) {
+            await new Promise(resolve => requestAnimationFrame(resolve));
+            frames.push(bounds());
+          }
+        }
+        observer.disconnect();
+        return { initial, frames, writes, notes };
+      });
+      assert(stability.frames.every(frame => frame.every((box, i) => box.every((v, j) => Math.abs(v - stability.initial[i][j]) < 1))),
+        `${width}px TV: resolution selection keeps card/button positions and dimensions stable`);
+      assert.equal(stability.writes.length, 0, 'Resolution changes and unchanged-viewport resize events do not reset TV zoom');
+      assert.deepEqual(stability.notes, [['hd'], ['4k'], ['smooth'], ['hd']], 'Only the selected resolution help is exposed');
+    }
+    await host.setViewportSize({ width: 1280, height: 720 });
+    console.log(`PASS ${engine}: repeated resolution changes stay stable across 960/1280/1920 TV widths`);
     await host.locator('[data-quality="smooth"]').click();
     for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 720 }]) {
       await host.setViewportSize(viewport);

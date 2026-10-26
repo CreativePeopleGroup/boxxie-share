@@ -551,7 +551,9 @@ button.chip:hover { border-color: var(--no); }
 .opts-row .field.inline { flex-direction: column; align-items: flex-start; gap: 8px; }
 .opts-row .field.inline .muted { display: none; }
 .opts-row .field.inline select { min-height: 44px; border-radius: 12px; min-width: 110px; }
-#quality-note { font-size: 0.78rem; }
+#quality-note { font-size: 0.78rem; display: grid; }
+#quality-note > span { grid-area: 1 / 1; }
+#quality-note > span[aria-hidden="true"] { visibility: hidden; }
 
 #host-start { background: linear-gradient(100deg, var(--garnet), #ef8a96); box-shadow: 0 16px 34px -14px rgba(233, 118, 132, 0.8); letter-spacing: 0.01em; }
 #host-start:hover { filter: brightness(1.05); }
