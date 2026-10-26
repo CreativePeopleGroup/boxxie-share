@@ -1100,7 +1100,13 @@
   function renderHealth() {
     const list = $("viewer-health");
     list.replaceChildren();
-    if (S.role !== "host" || !S.native) return (list.hidden = true);
+    if (S.role !== "host" || !S.native) {
+      list.hidden = true;
+      $("test-sound").hidden = true;
+      $("test-tv-capture").hidden = true;
+      $("sound-detail").hidden = true;
+      return;
+    }
     // Everyone watching (from the room's list), with their picture status and a Remove button
     for (const v of S.roster || []) {
       const id = v.id;
@@ -1119,8 +1125,8 @@
         const why = {
           "no-permission": " · no sound: Boxxie isn't allowed to record sound",
           error: " · no sound: recording didn't start",
-          silent: " · no sound reaching Boxxie (app blocks it, or Dolby is on)",
-          nodata: " · no sound reaching Boxxie (app blocks it, or Dolby is on)",
+          silent: " · captured audio is silent",
+          nodata: " · no audio samples available",
           none: " · no sound",
         }[h.audioState];
         const snd = h.sound === undefined ? "" : !h.sound ? why || " · no sound playing" : h.soundSending === false ? " · sound not sending" : " and sound";
@@ -1148,6 +1154,7 @@
     // Sound check tools (only while someone's watching)
     const anyone = !list.hidden;
     $("test-sound").hidden = !(anyone && typeof NATIVE.testSound === "function");
+    $("test-tv-capture").hidden = !(anyone && S.nativeAudio && typeof NATIVE.testTvSoundCapture === "function");
     const first = [...health.values()].find((x) => x.audioFrames !== undefined);
     const diag = first || localAudioHealth;
     $("sound-detail").hidden = !diag;
@@ -1161,6 +1168,11 @@
     try { NATIVE.testSound(); } catch {}
     toast("Sending a 3-second beep. Ask your friend if they heard it.", 5000);
     send({ type: "chat", text: "🔔 Test beep sent: can you hear it?" });
+  };
+  $("test-tv-capture").onclick = () => {
+    try { NATIVE.testTvSoundCapture(); } catch {}
+    toast("Playing a 4-second tone on the TV. Check whether your friend hears it too.", 6000);
+    send({ type: "chat", text: "🔊 TV capture test: a tone is playing on the TV. Can you hear it here too?" });
   };
 
   // ----- TV app: choose one of the TV's apps to open while sharing -----

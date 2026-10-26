@@ -96,6 +96,10 @@ async function receiving(page) {
     await viewer.goto(`${BASE}#join=${code}`);
     await viewer.locator('#join-start').click();
     await host.locator('#request-list .allow').click();
+    await host.locator('#test-tv-capture').click();
+    assert((await host.evaluate(() => window.__nativeCalls)).includes('tv-capture-test'),
+      'TV sound capture control calls the Android bridge');
+    console.log('PASS TV sound capture control reaches the native bridge (simulated)');
     try {
       await receiving(viewer);
     } catch (error) {

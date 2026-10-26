@@ -27,7 +27,6 @@ import org.webrtc.RtpParameters;
 import org.webrtc.RtpReceiver;
 import org.webrtc.RtpSender;
 import org.webrtc.RtpTransceiver;
-import org.webrtc.ScreenCapturerAndroid;
 import org.webrtc.SdpObserver;
 import org.webrtc.SessionDescription;
 import org.webrtc.SurfaceTextureHelper;
@@ -81,7 +80,7 @@ public final class ScreenShareEngine {
 
     private EglBase egl;
     private PeerConnectionFactory factory;
-    private ScreenCapturerAndroid capturer;
+    private MirroringScreenCapturer capturer;
     private SurfaceTextureHelper textureHelper;
     private VideoSource videoSource;
     private VideoTrack videoTrack;
@@ -222,7 +221,7 @@ public final class ScreenShareEngine {
                 session = UUID.randomUUID().toString().substring(0, 8);
                 final String captureSession = session;
 
-                capturer = new ScreenCapturerAndroid(permission, new MediaProjection.Callback() {
+                capturer = new MirroringScreenCapturer(permission, new MediaProjection.Callback() {
                     @Override
                     public void onStop() {
                         // The person stopped it from the system (notification, quick setting, pop-up).
@@ -325,6 +324,62 @@ public final class ScreenShareEngine {
 
     public void testTone() {
         toneUntilNs = System.nanoTime() + 3_000_000_000L;
+    }
+
+    // Unlike testTone(), this plays through Android's media mixer. The existing
+    // playback recorder must capture it: no samples are injected into WebRTC.
+    private android.media.AudioTrack captureTestTrack;
+    private ScheduledFuture<?> captureTestStop;
+
+    public void testPlaybackCapture() {
+        worker.execute(() -> {
+            if (!sharing || Build.VERSION.SDK_INT < 29) return;
+            stopCaptureTest();
+            toneUntilNs = 0;
+            try {
+                int rate = 48000;
+                short[] pcm = new short[rate * 4];
+                for (int i = 0; i < pcm.length; i++) {
+                    double fade = Math.min(1.0, Math.min(i, pcm.length - 1 - i) / 480.0);
+                    pcm[i] = (short) (Math.sin(2 * Math.PI * 660 * i / rate) * 5000 * fade);
+                }
+                AudioAttributes attrs = new AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .setAllowedCapturePolicy(AudioAttributes.ALLOW_CAPTURE_BY_ALL)
+                        .build();
+                captureTestTrack = new android.media.AudioTrack.Builder()
+                        .setAudioAttributes(attrs)
+                        .setAudioFormat(new AudioFormat.Builder().setSampleRate(rate)
+                                .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                                .setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
+                        .setTransferMode(android.media.AudioTrack.MODE_STATIC)
+                        .setBufferSizeInBytes(pcm.length * 2)
+                        .build();
+                int written = captureTestTrack.write(pcm, 0, pcm.length);
+                if (written != pcm.length || captureTestTrack.getState() != android.media.AudioTrack.STATE_INITIALIZED) {
+                    throw new IllegalStateException("Could not prepare TV capture test audio: " + written);
+                }
+                captureTestTrack.play();
+                final android.media.AudioTrack playing = captureTestTrack;
+                captureTestStop = ticker.schedule(() -> worker.execute(() -> {
+                    if (captureTestTrack == playing) stopCaptureTest();
+                }), 4500, TimeUnit.MILLISECONDS);
+            } catch (Exception e) {
+                Log.w(TAG, "TV capture test", e);
+                stopCaptureTest();
+                emit(safe(event("error"), "message", "The TV sound capture test couldn't start."));
+            }
+        });
+    }
+
+    private void stopCaptureTest() {
+        if (captureTestStop != null) { captureTestStop.cancel(false); captureTestStop = null; }
+        if (captureTestTrack != null) {
+            try { captureTestTrack.stop(); } catch (Exception ignored) {}
+            captureTestTrack.release();
+            captureTestTrack = null;
+        }
     }
 
     private void fillTone(ByteBuffer buffer, int frame, int channelCount, int sampleRate) {
@@ -706,6 +761,7 @@ public final class ScreenShareEngine {
         boolean wasSharing = sharing;
         sharing = false;
         stopHealthChecks();
+        stopCaptureTest();
         synchronized (playbackLock) {
             playbackConfig = null;
             releasePlayback();
