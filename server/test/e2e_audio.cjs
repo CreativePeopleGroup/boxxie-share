@@ -76,6 +76,12 @@ async function receiving(page) {
     await new Promise(resolve => setTimeout(resolve, 250));
   }
   if (!received) console.error(await page.evaluate(async () => ({
+    screens: [...document.querySelectorAll('.screen')].filter(s => !s.hidden).map(s => s.id),
+    waiting: document.getElementById('waiting-text').textContent,
+    joinError: document.getElementById('join-error').textContent,
+    code: document.getElementById('join-code').value,
+    signedIn: !!localStorage.getItem('bx:session'),
+    sockets: window.__testSockets.map(s => s.readyState),
     video: { width: document.getElementById('film').videoWidth, time: document.getElementById('film').currentTime },
     details: document.getElementById('screen-diag').textContent,
     peers: await Promise.all(window.__audioTestPeers.map(async p => ({
