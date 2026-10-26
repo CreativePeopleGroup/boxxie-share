@@ -125,10 +125,11 @@ async function mediaProgress(page) {
       await host.setViewportSize(viewport);
       await host.evaluate(phone => document.documentElement.classList.toggle('tv', !phone), viewport.width < 600);
       const boxes = await host.locator('[data-quality]').evaluateAll(buttons => buttons.map(b => {
-        const r = b.getBoundingClientRect(); return { w: r.width, h: r.height, y: r.top };
+        const r = b.getBoundingClientRect(); return { w: r.width, h: r.height, y: r.top, fits: b.scrollWidth <= b.clientWidth && b.scrollHeight <= b.clientHeight };
       }));
       assert(boxes.every(b => b.w > 0 && Math.abs(b.w - boxes[0].w) < 1 && Math.abs(b.h - boxes[0].h) < 1 && Math.abs(b.y - boxes[0].y) < 1),
         'Quality buttons have matching dimensions and alignment');
+      assert(boxes.every(b => b.fits), 'Quality labels fit inside their buttons');
       await host.screenshot({ path: `/tmp/boxxie-ui-quality-${viewport.width}-${engine}.png` });
     }
     await host.locator('#host-start').click();
