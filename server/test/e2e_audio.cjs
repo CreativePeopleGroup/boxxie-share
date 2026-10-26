@@ -122,8 +122,11 @@ async function mediaProgress(page) {
     // at desktop size before TV classification, authentication and fitting.
     let releaseSetup;
     const setupGate = new Promise(resolve => { releaseSetup = resolve; });
+    let releaseFont;
+    const fontGate = new Promise(resolve => { releaseFont = resolve; });
     await host.route('**/app.js', async route => { await setupGate; await route.continue(); });
-    const navigation = host.goto(BASE);
+    await host.route('**/fonts/inter-latin.woff2', async route => { await fontGate; await route.continue(); });
+    const navigation = host.goto(BASE, { waitUntil: 'domcontentloaded' });
     await host.waitForFunction(() => !!document.getElementById('screen-home'));
     assert(await host.evaluate(() => document.documentElement.classList.contains('tv')), 'TV layout is classified before deferred setup');
     assert(await host.locator('#screen-home').isHidden(), 'Uninitialised home cards remain hidden');
@@ -131,10 +134,15 @@ async function mediaProgress(page) {
     await navigation;
     await host.unroute('**/app.js');
     await host.locator('#screen-home:not([hidden])').waitFor();
+    // Force an actually late font response, beyond font-display: optional's
+    // brief initial window, rather than testing only a warm/fast font load.
+    await new Promise(resolve => setTimeout(resolve, 200));
     const initialCards = await host.locator('.home-grid > .card').evaluateAll(cards => cards.map(c => {
       const r = c.getBoundingClientRect(); return [r.x, r.y, r.width, r.height];
     }));
+    releaseFont();
     await host.evaluate(async () => { await document.fonts.ready; await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))); });
+    await host.unroute('**/fonts/inter-latin.woff2');
     const settledCards = await host.locator('.home-grid > .card').evaluateAll(cards => cards.map(c => {
       const r = c.getBoundingClientRect(); return [r.x, r.y, r.width, r.height];
     }));
