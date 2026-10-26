@@ -10,6 +10,7 @@ The receiving-device target is current iPhone/iPad Safari, Android Chrome and th
 - Use the pinned WebRTC recording-less API directly, so an incompatible dependency fails compilation rather than silently reverting to microphone capture.
 - Request that WebRTC disable software voice processing for film audio, in addition to the existing hardware processing settings.
 - Keep the viewer's sound button available if playback is refused. This applies to every browser using the viewer.
+- Bind a fresh viewer MediaStream when tracks change, retaining the live track of the other kind. WebKit testing found a blank picture after stop/restart when the previously inactive stream was reused. Ignore rejected play requests for streams that have already been replaced.
 
 The existing H.264/VP8 video negotiation and WebRTC audio negotiation remain in place. These changes address concrete failure paths; they do not establish the cause of the reported Hot Player/Stream Team silence without device measurements.
 
