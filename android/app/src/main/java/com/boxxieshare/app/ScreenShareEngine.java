@@ -674,6 +674,10 @@ public final class ScreenShareEngine {
         boolean wasSharing = sharing;
         sharing = false;
         stopHealthChecks();
+        capturedPcmBytes = 0;
+        capturedPeak = 0;
+        outgoingPeak = 0;
+        captureError = "";
         for (String id : new ArrayList<>(viewers.keySet())) closeViewer(id, true);
         releasePlayback();
         playbackConfig = null;
