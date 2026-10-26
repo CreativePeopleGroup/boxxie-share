@@ -87,6 +87,21 @@ async function receiving(page) {
   console.log(`PASS ${engine}: rendered video and received nonzero audio energy over WebRTC`);
 }
 
+async function mediaProgress(page) {
+  return page.evaluate(async () => {
+    let frames = 0, energy = 0;
+    for (const peer of window.__audioTestPeers) {
+      if (peer.connectionState === 'closed') continue;
+      for (const r of (await peer.getStats()).values()) {
+        if (r.type !== 'inbound-rtp') continue;
+        frames += r.framesDecoded || 0;
+        energy += r.totalAudioEnergy || 0;
+      }
+    }
+    return { frames, energy, time: document.getElementById('film').currentTime };
+  });
+}
+
 (async () => {
   let hostBrowser, viewerBrowser;
   try {
@@ -170,6 +185,45 @@ async function receiving(page) {
       return !film.paused && !film.muted && document.getElementById('sound-on').hidden;
     });
     console.log(`PASS ${engine}: user gesture starts unmuted playback`);
+
+    const tracksBefore = await viewer.evaluate(() => document.getElementById('film').srcObject.getTracks().map(t => t.id).sort());
+    const addsBefore = await host.evaluate(() => window.__nativeCalls.filter(c => c.startsWith('add:')).length);
+    await host.evaluate(() => window.__pauseHostPlayback(true));
+    await new Promise(resolve => setTimeout(resolve, 6500));
+    assert(await viewer.locator('#screen-room').isVisible(), 'Source pause keeps the viewer in the room');
+    // Browsers can pause the element during an interruption without ending tracks.
+    await viewer.evaluate(() => document.getElementById('film').pause());
+    await viewer.waitForFunction(() => !document.getElementById('film').paused);
+    const beforeResume = await mediaProgress(viewer);
+    await host.evaluate(() => window.__pauseHostPlayback(false));
+    const deadline = Date.now() + 15000;
+    let resumed = false;
+    while (Date.now() < deadline) {
+      const current = await mediaProgress(viewer);
+      if (current.frames > beforeResume.frames + 5 && current.energy > beforeResume.energy + 0.001 && current.time > beforeResume.time + 0.3) {
+        resumed = true; break;
+      }
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
+    assert(resumed, 'Host resume restores advancing video, audio energy and element playback');
+    assert.deepEqual(await viewer.evaluate(() => document.getElementById('film').srcObject.getTracks().map(t => t.id).sort()), tracksBefore,
+      'Pause/resume reuses the existing tracks');
+    assert.equal(await host.evaluate(() => window.__nativeCalls.filter(c => c.startsWith('add:')).length), addsBefore,
+      'An intentional source pause does not rebuild the media connection');
+    console.log(`PASS ${engine}: host pause/resume and interrupted viewer playback recover on existing tracks`);
+
+    // A failed media path can coexist with a healthy room socket. Repair just
+    // this viewer's screen peer, without new host approval or a room reload.
+    await viewer.evaluate(() => {
+      const pc = window.__audioTestPeers.find(p => p.connectionState !== 'closed' && p.oniceconnectionstatechange);
+      if (!pc) throw new Error('Screen peer missing');
+      Object.defineProperty(pc, 'iceConnectionState', { value: 'failed', configurable: true });
+      pc.dispatchEvent(new Event('iceconnectionstatechange'));
+    });
+    await receiving(viewer);
+    assert.equal(await host.evaluate(() => window.__nativeCalls.filter(c => c.startsWith('add:')).length), addsBefore + 1);
+    assert.equal(await host.locator('#request-list .allow').count(), 0);
+    console.log(`PASS ${engine}: failed screen connection recovers without leaving the room`);
 
     // Restart the native session: viewer must accept fresh audio/video tracks.
     await host.locator('#stage').dispatchEvent('mousemove');

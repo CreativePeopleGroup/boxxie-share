@@ -1358,6 +1358,16 @@
 
   // Viewer: the app's screen arrives on its own connection
   const screenPeers = new Map();
+  const screenRestartAt = new Map();
+  function restartScreenPeer(sp) {
+    if (screenPeers.get(sp.from) !== sp || S.role !== "viewer" || S.closing ||
+        !S.ws || S.ws.readyState !== 1 || document.visibilityState !== "visible") return;
+    const now = Date.now();
+    if (now - (screenRestartAt.get(sp.from) || 0) < 30000) return;
+    screenRestartAt.set(sp.from, now);
+    closeScreenPeer(sp.from);
+    send({ type: "signal", to: sp.from, data: { ch: "screen", restart: true } });
+  }
   async function screenDiag(sp) {
     if (screenPeers.get(sp.from) !== sp) return;
     let frames = 0, bytes = 0, audioBytes = 0;
@@ -1380,9 +1390,23 @@
         if (r.type === "remote-candidate") theirs.add(r.candidateType);
       });
     } catch {}
+    if (screenPeers.get(sp.from) !== sp) return;
     const el = $("screen-diag");
     const ice = sp.pc.iceConnectionState;
     const now = Date.now();
+    if (ice === "disconnected" || ice === "failed") {
+      if (!sp.disconnectedAt) sp.disconnectedAt = now;
+      if (ice === "failed" || now - sp.disconnectedAt > 10000) restartScreenPeer(sp);
+    } else sp.disconnectedAt = null;
+    // A paused/static source is valid. Only repair a stalled decoder when new
+    // video bytes keep arriving without decoded frames for a sustained interval.
+    if (bytes > (sp.lastVideoBytes || 0) && frames === sp.lastFrames) {
+      if (!sp.decodeStallAt) sp.decodeStallAt = now;
+      if (now - sp.decodeStallAt > 15000) restartScreenPeer(sp);
+    } else sp.decodeStallAt = null;
+    sp.lastVideoBytes = bytes;
+    if (screenPeers.get(sp.from) !== sp) return;
+    if (frames > (sp.lastFrames || 0)) resumeViewerPlayback();
     // Picture moving? Sound arriving?
     if (frames > (sp.lastFrames || 0)) sp.frameAt = now;
     if (audioBytes > (sp.lastAudio || 0) + 2000) sp.audioAt = now;
@@ -1433,6 +1457,10 @@
     clearInterval(sp.timer);
     $("screen-diag").hidden = true;
     try { sp.pc.close(); } catch {}
+    for (const track of sp.tracks || []) {
+      if (S.filmView) S.filmView.removeTrack(track);
+      try { track.stop(); } catch {}
+    }
     screenPeers.delete(from);
     // Closing doesn't fire "ended" on the tracks, so tidy the picture up here.
     const view = S.filmView;
@@ -1453,12 +1481,18 @@
     }
     if (!sp) {
       const pc = new RTCPeerConnection({ iceServers: S.ice, bundlePolicy: "max-bundle" });
-      sp = { pc, session: data.session, pending: [], from, started: Date.now() };
+      sp = { pc, session: data.session, pending: [], tracks: new Set(), from, started: Date.now() };
       sp.timer = setInterval(() => screenDiag(sp), 2000);
       pc.onicecandidate = (e) => {
         if (e.candidate) send({ type: "signal", to: from, data: { ch: "screen", session: sp.session, candidate: e.candidate.toJSON() } });
       };
-      pc.ontrack = (e) => attachFilm(e.streams[0] || new MediaStream([e.track]), e.track);
+      pc.ontrack = (e) => {
+        sp.tracks.add(e.track);
+        attachFilm(e.streams[0] || new MediaStream([e.track]), e.track);
+      };
+      pc.oniceconnectionstatechange = () => {
+        if (pc.iceConnectionState === "failed") restartScreenPeer(sp);
+      };
       screenPeers.set(from, sp);
     }
     const pc = sp.pc;
@@ -2344,6 +2378,16 @@
     if (!data || typeof data !== "object") return;
     if (data.ch === "screen") {
       if (S.role === "host") {
+        if (data.restart) {
+          if (S.nativeSharing && S.peers.has(from) && !S.companionOf.has(from)) {
+            const now = Date.now();
+            if (now - (screenRestartAt.get(from) || 0) >= 15000) {
+              screenRestartAt.set(from, now);
+              try { NATIVE.addViewer(from); } catch {}
+            }
+          }
+          return;
+        }
         if (NATIVE && S.native) try { NATIVE.signal(from, JSON.stringify(data)); } catch {}
       } else screenSignal(from, data);
       return;
@@ -2414,6 +2458,24 @@
   }
 
   // Viewer: show the film
+  let viewerPlayPending = null;
+  function resumeViewerPlayback() {
+    const view = S.filmView;
+    if (S.role !== "viewer" || S.closing || document.visibilityState !== "visible" ||
+        !view || filmVideo.srcObject !== view || !filmVideo.paused ||
+        !view.getTracks().some(t => t.readyState === "live") || viewerPlayPending === view) return;
+    viewerPlayPending = view;
+    Promise.resolve().then(() => filmVideo.play()).catch(() => {
+      if (filmVideo.srcObject === view && !S.closing) $("sound-on").hidden = false;
+    }).finally(() => {
+      if (viewerPlayPending === view) viewerPlayPending = null;
+    });
+  }
+  // A returning stream reuses its tracks, so ontrack alone cannot restart an
+  // element that the browser suspended during a source gap or backgrounding.
+  filmVideo.addEventListener("pause", () => setTimeout(resumeViewerPlayback, 0));
+  document.addEventListener("visibilitychange", resumeViewerPlayback);
+  window.addEventListener("pageshow", resumeViewerPlayback);
   // Viewer: the film's picture and sound can arrive in separate streams (and change when the
   // host switches film or screen), so always play the newest picture + newest sound together.
   function attachFilm(stream, track) {
@@ -2441,6 +2503,12 @@
     track.addEventListener("ended", () => {
       if (S.filmView && S.filmView.getTracks().includes(track)) S.filmView.removeTrack(track);
       showState();
+    });
+    track.addEventListener("unmute", () => {
+      if (S.filmView && S.filmView.getTracks().includes(track)) {
+        showState();
+        resumeViewerPlayback();
+      }
     });
     filmVideo.srcObject = view;
     showState();
@@ -2893,6 +2961,7 @@
 
   function cleanup() {
     S.closing = true;
+    screenRestartAt.clear();
     connectionEpoch++;
     connectionPending = false;
     clearTimeout(S.rejoinTimer);

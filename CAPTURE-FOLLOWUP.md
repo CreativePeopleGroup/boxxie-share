@@ -56,3 +56,22 @@ TV and phone viewport geometry checks and rendered previews verify alignment and
 visible keyboard/remote focus outlines. The persistent development rule is in AGENTS.md.
 
 Android recording service type: https://developer.android.com/reference/android/content/pm/ServiceInfo#FOREGROUND_SERVICE_TYPE_MICROPHONE
+
+## Pause/resume follow-up
+
+After 1.0.24 the user confirms both third-party players share audio successfully,
+but reports that TV playback resumes after a pause while the phone stays frozen
+with neither moving picture nor sound. The precise physical failure is not yet
+measured. Browser recovery previously ran only when tracks were attached.
+
+The viewer now retries a paused media element on track unmute, page return and
+continued decoded frames, retaining the sound retry control if playback is denied.
+A failed or persistently disconnected screen connection requests a fresh native
+peer for that approved viewer; sustained undecodable incoming video also requests
+repair. Intentional static source frames do not trigger decoder repair. Repairs
+are rate limited and do not restart the host player or room.
+
+Tests pause and resume the simulated source on the same tracks, interrupt viewer
+playback, require new decoded frames and audio energy, then simulate failed media
+ICE while the signalling socket remains connected. Physical stick pause/resume
+still needs verification after the web update.
