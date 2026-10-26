@@ -91,7 +91,6 @@
   function show(name) {
     document.querySelectorAll(".screen").forEach((s) => (s.hidden = s.dataset.screen !== name));
     fitTV();
-    root.classList.remove("booting");
     const target = document.querySelector(`[data-screen="${name}"]`);
     const first = target && (target.querySelector("[data-autofocus]") || target.querySelector("button:not([hidden]), input:not([type=hidden]):not(.visually-hidden)"));
     if (first && (isTV || name !== "room")) setTimeout(() => first.focus(), 30);

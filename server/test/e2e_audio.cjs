@@ -160,8 +160,21 @@ async function mediaProgress(page) {
       assert(boxes.every(b => b.w > 0 && Math.abs(b.w - boxes[0].w) < 1 && Math.abs(b.h - boxes[0].h) < 1 && Math.abs(b.y - boxes[0].y) < 1),
         'Quality buttons have matching dimensions and alignment');
       assert(boxes.every(b => b.fits), 'Quality labels fit inside their buttons');
+      const settings = await host.evaluate(() => {
+        const quality = document.querySelector('[aria-labelledby="quality-label"]').getBoundingClientRect();
+        const viewers = document.getElementById('max-viewers').getBoundingClientRect();
+        const sources = [...document.querySelectorAll('[data-source]')].map(b => b.getBoundingClientRect());
+        return { aligned: Math.abs(quality.top - viewers.top) < 1 && Math.abs(quality.height - viewers.height) < 1,
+          sources: sources.every(r => Math.abs(r.width - sources[0].width) < 1 && Math.abs(r.height - sources[0].height) < 1) };
+      });
+      assert(settings.aligned && settings.sources, 'Source buttons match; picture and viewer-count controls align at the same height');
       await host.screenshot({ path: `/tmp/boxxie-ui-quality-${viewport.width}-${engine}.png` });
     }
+    const actions = await host.evaluate(() => ['host-start', 'join-start'].map(id => {
+      const r = document.getElementById(id).getBoundingClientRect(); return { width:r.width, height:r.height, bottom:r.bottom };
+    }));
+    assert(actions.every(a => a.width > 0 && a.height > 0 && Math.abs(a.width - actions[0].width) < 1 && Math.abs(a.height - actions[0].height) < 1 && Math.abs(a.bottom - actions[0].bottom) < 1),
+      'Home actions match in size and baseline');
     await host.locator('#host-start').click();
     assert.deepEqual(await host.evaluate(() => window.__lastShareConfig.quality),
       { label: 'Smooth 720p', height: 720, width: 1280, maxBitrate: 2500000 },
