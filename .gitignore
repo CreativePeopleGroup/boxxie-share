@@ -1,4 +1,5 @@
 node_modules/
+builds/
 .wrangler/
 .dev.vars
 android/.gradle/

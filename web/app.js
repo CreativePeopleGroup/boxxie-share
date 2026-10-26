@@ -1062,7 +1062,13 @@
 
   // ----- TV app: how each friend's picture is doing (shown under "Friends join here") -----
   const health = new Map();
+  let localAudioHealth = null;
   function onViewerHealth(ev) {
+    if (ev.type === "audio-health") {
+      localAudioHealth = ev;
+      renderHealth();
+      return;
+    }
     if (!ev.peer) return;
     const h = health.get(ev.peer) || { frames: 0, last: 0 };
     if (ev.ice) h.ice = ev.ice;
@@ -1082,6 +1088,10 @@
       h.audioState = ev.audioState;
       h.audioFrames = ev.audioFrames;
       h.audioFormat = ev.audioFormat;
+      h.capturedPcmBytes = ev.capturedPcmBytes;
+      h.capturedPeak = ev.capturedPeak;
+      h.outgoingPeak = ev.outgoingPeak;
+      h.captureError = ev.captureError;
       h.limit = ev.limit;
     }
     health.set(ev.peer, h);
@@ -1139,8 +1149,13 @@
     const anyone = !list.hidden;
     $("test-sound").hidden = !(anyone && typeof NATIVE.testSound === "function");
     const first = [...health.values()].find((x) => x.audioFrames !== undefined);
-    $("sound-detail").hidden = !(anyone && first);
-    if (first) $("sound-detail").textContent = `Sound engine: ${first.audioState || "?"} · ${first.audioFrames} frames · ${first.audioFormat || "?"} · sent ${Math.round((first.audioBytes || 0) / 1024)} KB`;
+    const diag = first || localAudioHealth;
+    $("sound-detail").hidden = !diag;
+    if (diag) $("sound-detail").textContent =
+      `Sound: ${diag.audioState || "?"} · captured ${Math.round((diag.capturedPcmBytes || 0) / 1024)} KB` +
+      ` · input peak ${diag.capturedPeak ?? "?"} · output peak ${diag.outgoingPeak ?? "?"}` +
+      (first ? ` · RTP sent ${Math.round((first.audioBytes || 0) / 1024)} KB` : "") +
+      (diag.captureError ? ` · error: ${diag.captureError}` : "");
   }
   $("test-sound").onclick = () => {
     try { NATIVE.testSound(); } catch {}
@@ -1254,7 +1269,7 @@
     try { ev = typeof json === "string" ? JSON.parse(json) : json; } catch { return; }
     if (!ev) return;
     if (String(ev.type).startsWith("update")) return onUpdateEvent(ev);
-    if (ev.type === "viewer-state" || ev.type === "viewer-stats") return onViewerHealth(ev);
+    if (ev.type === "viewer-state" || ev.type === "viewer-stats" || ev.type === "audio-health") return onViewerHealth(ev);
     if (ev.type === "started" || ev.type === "denied") {
       const w = nativeWait;
       nativeWait = null;
@@ -2324,41 +2339,45 @@
   // Viewer: the film's picture and sound can arrive in separate streams (and change when the
   // host switches film or screen), so always play the newest picture + newest sound together.
   function attachFilm(stream, track) {
-    if (!S.filmView) S.filmView = new MediaStream();
-    const view = S.filmView;
+    // WebKit can leave the element attached to an inactive stream after a restart,
+    // even when replacement tracks are added to that same stream. Bind a fresh
+    // stream and retain only live tracks of the other kind (audio/video may arrive separately).
+    const previous = S.filmView;
+    const view = new MediaStream(previous ? previous.getTracks().filter(
+      (t) => t.kind !== track.kind && t.readyState === "live"
+    ) : []);
+    view.addTrack(track);
+    S.filmView = view;
     const showState = () => {
-      const live = view.getVideoTracks().some((t) => t.readyState === "live");
+      const live = S.filmView && S.filmView.getVideoTracks().some((t) => t.readyState === "live");
       $("stage-empty").hidden = live;
       if (!live) $("stage-empty-text").textContent = "The host has paused sharing. Stay here and it'll come back.";
     };
-    for (const t of view.getTracks()) if (t.kind === track.kind && t !== track) view.removeTrack(t);
-    if (!view.getTracks().includes(track)) view.addTrack(track);
     if (!stream._watched) {
       stream._watched = true;
       stream.addEventListener("removetrack", (ev) => {
-        if (view.getTracks().includes(ev.track)) view.removeTrack(ev.track);
+        if (S.filmView && S.filmView.getTracks().includes(ev.track)) S.filmView.removeTrack(ev.track);
         showState();
       });
     }
     track.addEventListener("ended", () => {
-      if (view.getTracks().includes(track)) view.removeTrack(track);
+      if (S.filmView && S.filmView.getTracks().includes(track)) S.filmView.removeTrack(track);
       showState();
     });
-    if (filmVideo.srcObject !== view) filmVideo.srcObject = view;
+    filmVideo.srcObject = view;
     showState();
-    if (!filmVideo.paused && !filmVideo.muted) return;
-    if (filmVideo.paused) {
-      filmVideo.muted = $("sound-on").hidden ? false : filmVideo.muted;
-      const p = filmVideo.play();
-      if (p && p.catch) {
-        p.catch(() => {
-          // Browsers block sound until you tap. Start silently and offer a button.
-          filmVideo.muted = true;
-          filmVideo.play().catch(() => {});
-          $("sound-on").hidden = false;
-          if (isTV) $("sound-on").focus();
-        });
-      }
+    filmVideo.muted = $("sound-on").hidden ? false : filmVideo.muted;
+    const p = filmVideo.play();
+    if (p && p.catch) {
+      p.catch(() => {
+        // A newer track may have replaced this stream while play() was pending.
+        if (filmVideo.srcObject !== view) return;
+        // Browsers block sound until you tap. Start silently and offer a button.
+        filmVideo.muted = true;
+        filmVideo.play().catch(() => {});
+        $("sound-on").hidden = false;
+        if (isTV) $("sound-on").focus();
+      });
     }
   }
   function qualityName(h) {
@@ -2375,10 +2394,16 @@
       $("screen-status").dataset.q = qualityName(filmVideo.videoHeight);
     }
   });
-  $("sound-on").onclick = () => {
+  $("sound-on").onclick = async () => {
     filmVideo.muted = false;
-    filmVideo.play().catch(() => {});
-    $("sound-on").hidden = true;
+    try {
+      await filmVideo.play();
+      $("sound-on").hidden = !filmVideo.muted && !filmVideo.paused;
+    } catch {
+      // A failed play request must leave a way to retry on phones, browsers and TVs.
+      $("sound-on").hidden = false;
+      toast("Sound couldn't start. Press Turn sound on to try again.");
+    }
   };
 
   // ---------------- video call ----------------

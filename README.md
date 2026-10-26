@@ -139,12 +139,17 @@ sign in the TV**, and the TV signs itself in. Email codes also work on the TV.
 
 ### Step 6: Build the Fire TV / Android app
 
-1. **Actions → Build Android app → Run workflow**. It takes about 5 minutes.
+1. **Actions → Build Android app → Run workflow**. Enable **Publish as latest release after signing verification** to publish; leave it off for a build-only candidate. It takes about 5 minutes.
 2. The app appears under **Releases** as `BoxxieShare.apk`. This link always gets the
    newest version:
    `https://github.com/YOUR-USERNAME/boxxie-share/releases/latest/download/BoxxieShare.apk`
 
 From now on, any change you push to `web/`, `server/` or `android/` redeploys automatically.
+
+Release builds require the stored release signing key and verify that the APK's signing
+certificate matches the current published APK before publishing an update. Configure the
+signing secrets described under **Google Play → Make your upload key** below; the same key
+also signs the direct APK. Keep that key for future updates.
 
 ---
 
