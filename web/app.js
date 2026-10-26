@@ -1062,7 +1062,13 @@
 
   // ----- TV app: how each friend's picture is doing (shown under "Friends join here") -----
   const health = new Map();
+  let localAudioHealth = null;
   function onViewerHealth(ev) {
+    if (ev.type === "audio-health") {
+      localAudioHealth = ev;
+      renderHealth();
+      return;
+    }
     if (!ev.peer) return;
     const h = health.get(ev.peer) || { frames: 0, last: 0 };
     if (ev.ice) h.ice = ev.ice;
@@ -1082,6 +1088,10 @@
       h.audioState = ev.audioState;
       h.audioFrames = ev.audioFrames;
       h.audioFormat = ev.audioFormat;
+      h.capturedPcmBytes = ev.capturedPcmBytes;
+      h.capturedPeak = ev.capturedPeak;
+      h.outgoingPeak = ev.outgoingPeak;
+      h.captureError = ev.captureError;
       h.limit = ev.limit;
     }
     health.set(ev.peer, h);
@@ -1139,8 +1149,13 @@
     const anyone = !list.hidden;
     $("test-sound").hidden = !(anyone && typeof NATIVE.testSound === "function");
     const first = [...health.values()].find((x) => x.audioFrames !== undefined);
-    $("sound-detail").hidden = !(anyone && first);
-    if (first) $("sound-detail").textContent = `Sound engine: ${first.audioState || "?"} · ${first.audioFrames} frames · ${first.audioFormat || "?"} · sent ${Math.round((first.audioBytes || 0) / 1024)} KB`;
+    const diag = first || localAudioHealth;
+    $("sound-detail").hidden = !diag;
+    if (diag) $("sound-detail").textContent =
+      `Sound: ${diag.audioState || "?"} · captured ${Math.round((diag.capturedPcmBytes || 0) / 1024)} KB` +
+      ` · input peak ${diag.capturedPeak ?? "?"} · output peak ${diag.outgoingPeak ?? "?"}` +
+      (first ? ` · RTP sent ${Math.round((first.audioBytes || 0) / 1024)} KB` : "") +
+      (diag.captureError ? ` · error: ${diag.captureError}` : "");
   }
   $("test-sound").onclick = () => {
     try { NATIVE.testSound(); } catch {}
@@ -1254,7 +1269,7 @@
     try { ev = typeof json === "string" ? JSON.parse(json) : json; } catch { return; }
     if (!ev) return;
     if (String(ev.type).startsWith("update")) return onUpdateEvent(ev);
-    if (ev.type === "viewer-state" || ev.type === "viewer-stats") return onViewerHealth(ev);
+    if (ev.type === "viewer-state" || ev.type === "viewer-stats" || ev.type === "audio-health") return onViewerHealth(ev);
     if (ev.type === "started" || ev.type === "denied") {
       const w = nativeWait;
       nativeWait = null;
