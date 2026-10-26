@@ -93,7 +93,9 @@
     fitTV();
     const target = document.querySelector(`[data-screen="${name}"]`);
     const first = target && (target.querySelector("[data-autofocus]") || target.querySelector("button:not([hidden]), input:not([type=hidden]):not(.visually-hidden)"));
-    if (first && (isTV || name !== "room")) setTimeout(() => first.focus(), 30);
+    // Focus before showing the next frame. A delayed focus can steal keystrokes
+    // from someone who has already started entering a room code.
+    if (first && (isTV || name !== "room")) first.focus();
   }
 
   let toastTimer;
@@ -253,7 +255,7 @@
     if (!after && resumeTVRoom()) return;
     if (!after && resumeViewerRoom()) return;
     show("home");
-    if (after && after.join) setTimeout(() => $("join-start").focus(), 60);
+    if (after && after.join) $("join-start").focus();
   }
 
   async function loadMe() {

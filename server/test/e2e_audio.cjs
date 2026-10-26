@@ -346,7 +346,14 @@ async function mediaProgress(page) {
     await viewer.locator('#screen-home:not([hidden])').waitFor();
     assert.equal(await viewer.evaluate(() => sessionStorage.getItem('bx:viewerRoom')), null,
       'Explicit leave must not auto-rejoin');
+    await viewer.evaluate(async () => {
+      const input = document.getElementById('join-code');
+      input.focus();
+      await new Promise(resolve => setTimeout(resolve, 80));
+      if (document.activeElement !== input) throw new Error('Delayed autofocus stole the room-code input focus');
+    });
     await viewer.locator('#join-code').fill(code);
+    assert.equal((await viewer.locator('#join-code').inputValue()).replace(/-/g, ''), code);
     await viewer.locator('#join-start').click();
     await receiving(viewer);
     console.log(`PASS ${engine}: explicit leave stays out after reload; manual rejoin still works`);
