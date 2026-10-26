@@ -220,6 +220,7 @@ async function mediaProgress(page) {
       Object.defineProperty(pc, 'iceConnectionState', { value: 'failed', configurable: true });
       pc.dispatchEvent(new Event('iceconnectionstatechange'));
     });
+    await host.waitForFunction(expected => window.__nativeCalls.filter(c => c.startsWith('add:')).length === expected, addsBefore + 1);
     await receiving(viewer);
     assert.equal(await host.evaluate(() => window.__nativeCalls.filter(c => c.startsWith('add:')).length), addsBefore + 1);
     assert.equal(await host.locator('#request-list .allow').count(), 0);
