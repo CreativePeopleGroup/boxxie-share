@@ -376,7 +376,11 @@ public final class ScreenShareEngine {
                     ringFill += n;
                 }
                 long t = System.nanoTime();
-                if (n > 0) bytesSeenNs = t;
+                if (n > 0) {
+                    bytesSeenNs = t;
+                    capturedPcmBytes += n;
+                    capturedPeak = pcmPeak(readScratch, n);
+                }
                 if (n > 0 && !isSilent(readScratch, n)) soundSeenNs = t;
                 audioState = t - soundSeenNs < 5_000_000_000L ? "ok" : t - bytesSeenNs < 5_000_000_000L ? "silent" : "nodata";
                 if (ringFill >= frame) {
@@ -394,11 +398,31 @@ public final class ScreenShareEngine {
             }
         } catch (Throwable t) {
             audioState = "error";
+            captureError = t.getClass().getSimpleName() + ": " + String.valueOf(t.getMessage());
             Log.w(TAG, "playback capture", t);
             releasePlayback();
             zero(buffer, frame);
         }
+        outgoingPeak = pcmPeak(buffer, frame);
         pace();
+    }
+
+    private static int pcmPeak(byte[] data, int length) {
+        int peak = 0;
+        for (int i = 0; i + 1 < length; i += 2) {
+            int sample = (short) ((data[i] & 0xff) | (data[i + 1] << 8));
+            peak = Math.max(peak, Math.abs(sample));
+        }
+        return peak;
+    }
+
+    private static int pcmPeak(ByteBuffer data, int length) {
+        int peak = 0;
+        for (int i = 0; i + 1 < length; i += 2) {
+            int sample = (short) ((data.get(i) & 0xff) | (data.get(i + 1) << 8));
+            peak = Math.max(peak, Math.abs(sample));
+        }
+        return peak;
     }
 
     private volatile long soundSeenNs;
@@ -407,6 +431,11 @@ public final class ScreenShareEngine {
     // What happened to the TV's sound: ok | silent | nodata | no-permission | error | none
     private volatile String audioState = "none";
     private volatile long bytesSeenNs;
+    // Diagnostic counters: raw playback capture and the actual PCM handed to WebRTC.
+    private volatile long capturedPcmBytes;
+    private volatile int outgoingPeak;
+    private volatile int capturedPeak;
+    private volatile String captureError = "";
 
     private static boolean isSilent(byte[] b, int n) {
         for (int i = 0; i + 1 < n; i += 64) {
@@ -548,7 +577,9 @@ public final class ScreenShareEngine {
                     .put("bytes", bytes).put("codec", codec).put("encoder", encoder).put("vp8", v.vp8)
                     .put("sound", System.nanoTime() - soundSeenNs < 5_000_000_000L)
                     .put("fps", Math.round(fps)).put("limit", limit).put("audioBytes", audioBytes)
-                    .put("audioState", audioState).put("audioFrames", callbacks).put("audioFormat", lastFormat));
+                    .put("audioState", audioState).put("audioFrames", callbacks).put("audioFormat", lastFormat)
+                    .put("capturedPcmBytes", capturedPcmBytes).put("capturedPeak", capturedPeak)
+                    .put("outgoingPeak", outgoingPeak).put("captureError", captureError));
         } catch (Exception ignored) {}
         // Connected for ~6 seconds and the H.264 encoder hasn't made a single frame: use VP8 instead.
         if (!v.vp8 && v.noPictureChecks >= 2) {
