@@ -118,7 +118,29 @@ async function mediaProgress(page) {
     for (const page of [host, viewer]) page.on('console', msg => {
       if (msg.type() === 'warning' || msg.type() === 'error') console.error(msg.text());
     });
-    await host.goto(BASE);
+    // Cold load with deferred app setup held back: the home cards must not flash
+    // at desktop size before TV classification, authentication and fitting.
+    let releaseSetup;
+    const setupGate = new Promise(resolve => { releaseSetup = resolve; });
+    await host.route('**/app.js', async route => { await setupGate; await route.continue(); });
+    const navigation = host.goto(BASE);
+    await host.waitForFunction(() => !!document.getElementById('screen-home'));
+    assert(await host.evaluate(() => document.documentElement.classList.contains('tv')), 'TV layout is classified before deferred setup');
+    assert(await host.locator('#screen-home').isHidden(), 'Uninitialised home cards remain hidden');
+    releaseSetup();
+    await navigation;
+    await host.unroute('**/app.js');
+    await host.locator('#screen-home:not([hidden])').waitFor();
+    const initialCards = await host.locator('.home-grid > .card').evaluateAll(cards => cards.map(c => {
+      const r = c.getBoundingClientRect(); return [r.x, r.y, r.width, r.height];
+    }));
+    await host.evaluate(async () => { await document.fonts.ready; await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))); });
+    const settledCards = await host.locator('.home-grid > .card').evaluateAll(cards => cards.map(c => {
+      const r = c.getBoundingClientRect(); return [r.x, r.y, r.width, r.height];
+    }));
+    assert(initialCards.every((box, i) => box.every((v, j) => Math.abs(v - settledCards[i][j]) < 1)),
+      'Home card geometry stays stable after startup and font loading');
+    console.log(`PASS ${engine}: cold startup sizes TV cards before showing them, without a late font/layout jump`);
     await host.locator('[data-source="screen"]').click();
     await host.locator('[data-quality="smooth"]').click();
     for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 720 }]) {

@@ -97,3 +97,17 @@ candidate addresses or relay credentials are displayed. Compare the next remote
 session on Smooth 720p and, if practical, a VPN-bypassed Boxxie session before
 claiming which network component caused the problem. Browser tests use local ICE
 and cannot validate an outside-home/VPN route or stick encoding performance.
+
+## Startup card resize
+
+The TV page previously exposed the home screen before deferred app setup, applied
+TV sizing later, then scheduled another shrink from a body ResizeObserver. A
+remote display-swap font could also change text metrics after first render.
+
+A small head script now establishes TV classification and base scale before body
+paint. Home stays hidden until the selected screen is ready, and show() computes
+its final fit synchronously before revealing it. Remove the observer-driven late
+shrink. Bundle the same Inter Latin variable font and its OFL locally, preload it,
+and use optional font display to avoid a late swap. The offline shell includes
+both startup assets. Cold-load tests hold app.js, verify the uninitialised home is
+hidden, then compare card geometry before/after fonts settle.
