@@ -642,6 +642,11 @@ public class MainActivity extends Activity {
             if (ourPage && engine != null) engine.testTone();
         }
 
+        @JavascriptInterface
+        public void testTvSoundCapture() {
+            if (ourPage && engine != null) engine.testPlaybackCapture();
+        }
+
         /** Play/pause whatever app is playing on the TV (Hot Player etc.), like the remote's ⏯ key. */
         @JavascriptInterface
         public void mediaKey(String action) {
