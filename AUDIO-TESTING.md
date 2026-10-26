@@ -30,6 +30,13 @@ BOXXIE_BROWSER=firefox node test/e2e_audio.cjs
 
 The isolated Android CI workflow builds the APK without publishing a production release. Its app URL points to the existing production website; the viewer button change requires the updated website to be deployed after review. Installing the APK alone does not install the website changes. CI uses a temporary debug signing key: replacing an installation signed with a different key may require uninstalling the old app, which clears its local sign-in state.
 
+For an update over an existing release installation, use the main Android release workflow
+instead of the debug-signed test APK. Manual runs default to build-only mode. The workflow
+requires the stored release key, checks real SHA-256 certificate fingerprints against the
+current public APK, and requires a higher version code before it can publish. After a
+verified release is published, the direct app's **Check for updates** downloads it; Android
+still asks the person to confirm installation on the stick.
+
 ## Physical-device acceptance
 
 For each target receiver, record its model, OS/browser, host APK version, network and source player. Test:
