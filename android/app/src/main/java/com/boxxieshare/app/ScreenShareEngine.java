@@ -336,6 +336,7 @@ public final class ScreenShareEngine {
         lastFormat = sampleRate + "Hz x" + channelCount;
         if (System.nanoTime() < toneUntilNs) {
             fillTone(buffer, frame, channelCount, sampleRate);
+            outgoingPeak = pcmPeak(buffer, frame);
             pace();
             return;
         }
