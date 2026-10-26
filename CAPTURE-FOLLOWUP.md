@@ -56,3 +56,58 @@ TV and phone viewport geometry checks and rendered previews verify alignment and
 visible keyboard/remote focus outlines. The persistent development rule is in AGENTS.md.
 
 Android recording service type: https://developer.android.com/reference/android/content/pm/ServiceInfo#FOREGROUND_SERVICE_TYPE_MICROPHONE
+
+## Pause/resume follow-up
+
+After 1.0.24 the user confirms both third-party players share audio successfully,
+but reports that TV playback resumes after a pause while the phone stays frozen
+with neither moving picture nor sound. The precise physical failure is not yet
+measured. Browser recovery previously ran only when tracks were attached.
+
+The viewer now retries a paused media element on track unmute, page return and
+continued decoded frames, retaining the sound retry control if playback is denied.
+A failed or persistently disconnected screen connection requests a fresh native
+peer for that approved viewer; sustained undecodable incoming video also requests
+repair. Intentional static source frames do not trigger decoder repair. Repairs
+are rate limited and do not restart the host player or room.
+
+Tests pause and resume the simulated source on the same tracks, interrupt viewer
+playback, require new decoded frames and audio energy, then simulate failed media
+ICE while the signalling socket remains connected. Physical stick pause/resume
+still needs verification after the web update.
+
+## Outside-home picture report
+
+The user reports choppy picture for an external Wi-Fi viewer while the stick's
+VPN was enabled. A supplied 7.65-second WhatsApp recording shows playback and a
+return to the player menu; its recompressed 384x832 capture does not establish the
+original live frame rate or end-to-end latency. The deployed relay health endpoint
+reports Cloudflare credentials are configured; this does not prove the route or
+throughput of the reported session.
+
+HD's video bitrate cap is 8 Mbps per viewer, with a separate outgoing stream for
+each viewer. Add a selectable Smooth 720p profile capped at 2.5 Mbps video per
+viewer, preserving HD as the default. Existing Android 1.0.24 already accepts the
+profile's height and bitrate configuration, so this option needs a website update,
+not a new APK. These are caps, not measured usage or promised upload requirements.
+
+Phone diagnostics now expose measured received video bitrate and, when available,
+selected candidate route/transport, round-trip time and decoded frame rate. No
+candidate addresses or relay credentials are displayed. Compare the next remote
+session on Smooth 720p and, if practical, a VPN-bypassed Boxxie session before
+claiming which network component caused the problem. Browser tests use local ICE
+and cannot validate an outside-home/VPN route or stick encoding performance.
+
+## Startup card resize
+
+The TV page previously exposed the home screen before deferred app setup, applied
+TV sizing later, then scheduled another shrink from a body ResizeObserver. A
+remote display-swap font could also change text metrics after first render.
+
+A small head script now establishes TV classification and base scale before body
+paint. Home stays hidden until the selected screen is ready, and show() computes
+its final fit synchronously before revealing it. Remove the observer-driven late
+shrink. Bundle the same Inter Latin variable font and its OFL locally, preload it,
+and use optional font display to avoid a late swap. The offline shell includes
+both startup assets. Cold-load tests hold app.js, verify the uninitialised home is
+hidden, then compare card geometry before/after fonts settle.

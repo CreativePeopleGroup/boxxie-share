@@ -16,6 +16,7 @@
   // Picture quality. Bitrate is per friend, sent from the host's home connection.
   // If the connection can't keep up, WebRTC steps the picture down automatically.
   const QUALITY = {
+    smooth: { label: "Smooth 720p", height: 720, width: 1280, maxBitrate: 2_500_000 },
     hd: { label: "HD 1080p", height: 1080, width: 1920, maxBitrate: 8_000_000 },
     "4k": { label: "4K Ultra HD", height: 2160, width: 3840, maxBitrate: 25_000_000 },
   };
@@ -50,7 +51,6 @@
   if (isTV) {
     fitTV();
     addEventListener("resize", fitTV);
-    new ResizeObserver(() => requestAnimationFrame(shrinkToFit)).observe(document.body);
   }
 
   // ---------------- tiny storage helpers (never required to work) ----------------
@@ -64,7 +64,7 @@
   const S = {
     role: null, // "host" | "viewer"
     source: "file", // host: "file" | "screen"
-    quality: "hd", // host: "hd" | "4k"
+    quality: "hd", // host: "smooth" | "hd" | "4k"
     capture: null, // host: stream captured from the film player
     code: null,
     hostToken: null,
@@ -93,7 +93,9 @@
     fitTV();
     const target = document.querySelector(`[data-screen="${name}"]`);
     const first = target && (target.querySelector("[data-autofocus]") || target.querySelector("button:not([hidden]), input:not([type=hidden]):not(.visually-hidden)"));
-    if (first && (isTV || name !== "room")) setTimeout(() => first.focus(), 30);
+    // Focus before showing the next frame. A delayed focus can steal keystrokes
+    // from someone who has already started entering a room code.
+    if (first && (isTV || name !== "room")) first.focus();
   }
 
   let toastTimer;
@@ -253,7 +255,7 @@
     if (!after && resumeTVRoom()) return;
     if (!after && resumeViewerRoom()) return;
     show("home");
-    if (after && after.join) setTimeout(() => $("join-start").focus(), 60);
+    if (after && after.join) $("join-start").focus();
   }
 
   async function loadMe() {
@@ -735,7 +737,9 @@
     document.querySelectorAll("[data-quality]").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.quality === q)));
     $("quality-note").textContent = q === "4k"
       ? "4K needs about 25 Mbps of upload for each friend, so it suits 1–2 friends on full-fibre broadband, with a 4K film or screen. If your connection can't keep up, the picture steps down by itself."
-      : "Sharp on any TV and works on most home broadband. About 8 Mbps of upload per friend.";
+      : q === "smooth"
+        ? "Uses up to 2.5 Mbps of video upload per friend, plus sound and network overhead. Try this for remote viewers, VPNs or a choppy picture."
+        : "Up to 8 Mbps of video upload per friend, plus sound and network overhead. Choose Smooth 720p if the picture is choppy.";
     if (q === "4k" && Number($("max-viewers").value) > 3) $("max-viewers").value = "3";
   }
   document.querySelectorAll("[data-quality]").forEach((b) => (b.onclick = () => setQuality(b.dataset.quality)));
@@ -1358,15 +1362,40 @@
 
   // Viewer: the app's screen arrives on its own connection
   const screenPeers = new Map();
+  const screenRestartAt = new Map();
+  function restartScreenPeer(sp) {
+    if (screenPeers.get(sp.from) !== sp || S.role !== "viewer" || S.closing ||
+        !S.ws || S.ws.readyState !== 1 || document.visibilityState !== "visible") return;
+    const now = Date.now();
+    if (now - (screenRestartAt.get(sp.from) || 0) < 30000) return;
+    screenRestartAt.set(sp.from, now);
+    closeScreenPeer(sp.from);
+    $("stage-empty-text").textContent = "Reconnecting to the TV's picture…";
+    send({ type: "signal", to: sp.from, data: { ch: "screen", restart: true } });
+  }
   async function screenDiag(sp) {
     if (screenPeers.get(sp.from) !== sp) return;
     let frames = 0, bytes = 0, audioBytes = 0;
+    let route = "", fps = null, roundTrip = null;
     const mine = new Set(), theirs = new Set();
     try {
-      (await sp.pc.getStats()).forEach((r) => {
+      const report = await sp.pc.getStats();
+      let pairId;
+      report.forEach(r => { if (r.type === "transport" && r.selectedCandidatePairId) pairId = r.selectedCandidatePairId; });
+      const pair = pairId ? report.get(pairId) : [...report.values()].find(r =>
+        r.type === "candidate-pair" && r.state === "succeeded" && r.nominated);
+      if (pair) {
+        const local = report.get(pair.localCandidateId), remote = report.get(pair.remoteCandidateId);
+        const relay = [local, remote].some(c => c && c.candidateType === "relay");
+        const protocol = local && (local.relayProtocol || local.protocol);
+        route = `${relay ? "relay" : "direct"}${protocol ? " " + protocol.toUpperCase() : ""}`;
+        if (typeof pair.currentRoundTripTime === "number") roundTrip = Math.round(pair.currentRoundTripTime * 1000);
+      }
+      report.forEach((r) => {
         if (r.type === "inbound-rtp" && r.kind === "video") {
           frames += r.framesDecoded || 0;
           bytes += r.bytesReceived || 0;
+          if (typeof r.framesPerSecond === "number") fps = r.framesPerSecond;
         }
         if (r.type === "inbound-rtp" && r.kind === "audio") {
           audioBytes += r.bytesReceived || 0;
@@ -1380,9 +1409,29 @@
         if (r.type === "remote-candidate") theirs.add(r.candidateType);
       });
     } catch {}
+    if (screenPeers.get(sp.from) !== sp) return;
     const el = $("screen-diag");
     const ice = sp.pc.iceConnectionState;
     const now = Date.now();
+    const elapsed = sp.sampleAt ? (now - sp.sampleAt) / 1000 : 0;
+    const mbps = elapsed > 0 ? Math.max(0, bytes - (sp.sampleBytes || 0)) * 8 / elapsed / 1e6 : null;
+    sp.sampleAt = now;
+    sp.sampleBytes = bytes;
+    sp.networkDetails = [route, roundTrip === null ? "" : `${roundTrip} ms round trip`,
+      mbps === null ? "" : `${mbps.toFixed(2)} Mbps received`, fps === null ? "" : `${Math.round(fps)} fps`].filter(Boolean).join(" · ");
+    if (ice === "disconnected" || ice === "failed") {
+      if (!sp.disconnectedAt) sp.disconnectedAt = now;
+      if (ice === "failed" || now - sp.disconnectedAt > 10000) restartScreenPeer(sp);
+    } else sp.disconnectedAt = null;
+    // A paused/static source is valid. Only repair a stalled decoder when new
+    // video bytes keep arriving without decoded frames for a sustained interval.
+    if (bytes > (sp.lastVideoBytes || 0) && frames === sp.lastFrames) {
+      if (!sp.decodeStallAt) sp.decodeStallAt = now;
+      if (now - sp.decodeStallAt > 15000) restartScreenPeer(sp);
+    } else sp.decodeStallAt = null;
+    sp.lastVideoBytes = bytes;
+    if (screenPeers.get(sp.from) !== sp) return;
+    if (frames > (sp.lastFrames || 0)) resumeViewerPlayback();
     // Picture moving? Sound arriving?
     if (frames > (sp.lastFrames || 0)) sp.frameAt = now;
     if (audioBytes > (sp.lastAudio || 0) + 2000) sp.audioAt = now;
@@ -1406,7 +1455,7 @@
         return;
       }
       const small = document.createElement("small");
-      small.textContent = `Network: ${ice} · sound received ${Math.round(audioBytes / 1024)} KB · level ${(sp.level || 0).toFixed(3)} · ${filmVideo.muted ? "muted here" : "not muted"} · picture ${frames} frames`;
+      small.textContent = `Network: ${ice}${sp.networkDetails ? " · " + sp.networkDetails : ""} · sound received ${Math.round(audioBytes / 1024)} KB · level ${(sp.level || 0).toFixed(3)} · ${filmVideo.muted ? "muted here" : "not muted"} · picture ${frames} frames`;
       el.append(small);
       el.hidden = false;
       return;
@@ -1433,6 +1482,10 @@
     clearInterval(sp.timer);
     $("screen-diag").hidden = true;
     try { sp.pc.close(); } catch {}
+    for (const track of sp.tracks || []) {
+      if (S.filmView) S.filmView.removeTrack(track);
+      try { track.stop(); } catch {}
+    }
     screenPeers.delete(from);
     // Closing doesn't fire "ended" on the tracks, so tidy the picture up here.
     const view = S.filmView;
@@ -1453,12 +1506,18 @@
     }
     if (!sp) {
       const pc = new RTCPeerConnection({ iceServers: S.ice, bundlePolicy: "max-bundle" });
-      sp = { pc, session: data.session, pending: [], from, started: Date.now() };
+      sp = { pc, session: data.session, pending: [], tracks: new Set(), from, started: Date.now() };
       sp.timer = setInterval(() => screenDiag(sp), 2000);
       pc.onicecandidate = (e) => {
         if (e.candidate) send({ type: "signal", to: from, data: { ch: "screen", session: sp.session, candidate: e.candidate.toJSON() } });
       };
-      pc.ontrack = (e) => attachFilm(e.streams[0] || new MediaStream([e.track]), e.track);
+      pc.ontrack = (e) => {
+        sp.tracks.add(e.track);
+        attachFilm(e.streams[0] || new MediaStream([e.track]), e.track);
+      };
+      pc.oniceconnectionstatechange = () => {
+        if (pc.iceConnectionState === "failed") restartScreenPeer(sp);
+      };
       screenPeers.set(from, sp);
     }
     const pc = sp.pc;
@@ -2344,6 +2403,16 @@
     if (!data || typeof data !== "object") return;
     if (data.ch === "screen") {
       if (S.role === "host") {
+        if (data.restart) {
+          if (S.nativeSharing && S.peers.has(from) && !S.companionOf.has(from)) {
+            const now = Date.now();
+            if (now - (screenRestartAt.get(from) || 0) >= 15000) {
+              screenRestartAt.set(from, now);
+              try { NATIVE.addViewer(from); } catch {}
+            }
+          }
+          return;
+        }
         if (NATIVE && S.native) try { NATIVE.signal(from, JSON.stringify(data)); } catch {}
       } else screenSignal(from, data);
       return;
@@ -2414,6 +2483,26 @@
   }
 
   // Viewer: show the film
+  let viewerPlayPending = null;
+  function resumeViewerPlayback() {
+    const view = S.filmView;
+    if (S.role !== "viewer" || S.closing || document.visibilityState !== "visible" ||
+        !view || filmVideo.srcObject !== view || !filmVideo.paused ||
+        !view.getTracks().some(t => t.readyState === "live") || viewerPlayPending === view) return;
+    viewerPlayPending = view;
+    Promise.resolve().then(() => {
+      if (filmVideo.srcObject === view && S.role === "viewer" && !S.closing) return filmVideo.play();
+    }).catch(() => {
+      if (filmVideo.srcObject === view && !S.closing) $("sound-on").hidden = false;
+    }).finally(() => {
+      if (viewerPlayPending === view) viewerPlayPending = null;
+    });
+  }
+  // A returning stream reuses its tracks, so ontrack alone cannot restart an
+  // element that the browser suspended during a source gap or backgrounding.
+  filmVideo.addEventListener("pause", () => setTimeout(resumeViewerPlayback, 0));
+  document.addEventListener("visibilitychange", resumeViewerPlayback);
+  window.addEventListener("pageshow", resumeViewerPlayback);
   // Viewer: the film's picture and sound can arrive in separate streams (and change when the
   // host switches film or screen), so always play the newest picture + newest sound together.
   function attachFilm(stream, track) {
@@ -2441,6 +2530,12 @@
     track.addEventListener("ended", () => {
       if (S.filmView && S.filmView.getTracks().includes(track)) S.filmView.removeTrack(track);
       showState();
+    });
+    track.addEventListener("unmute", () => {
+      if (S.filmView && S.filmView.getTracks().includes(track)) {
+        showState();
+        resumeViewerPlayback();
+      }
     });
     filmVideo.srcObject = view;
     showState();
@@ -2893,6 +2988,7 @@
 
   function cleanup() {
     S.closing = true;
+    screenRestartAt.clear();
     connectionEpoch++;
     connectionPending = false;
     clearTimeout(S.rejoinTimer);

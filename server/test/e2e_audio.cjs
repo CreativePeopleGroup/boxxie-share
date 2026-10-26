@@ -76,6 +76,12 @@ async function receiving(page) {
     await new Promise(resolve => setTimeout(resolve, 250));
   }
   if (!received) console.error(await page.evaluate(async () => ({
+    screens: [...document.querySelectorAll('.screen')].filter(s => !s.hidden).map(s => s.id),
+    waiting: document.getElementById('waiting-text').textContent,
+    joinError: document.getElementById('join-error').textContent,
+    code: document.getElementById('join-code').value,
+    signedIn: !!localStorage.getItem('bx:session'),
+    sockets: window.__testSockets.map(s => s.readyState),
     video: { width: document.getElementById('film').videoWidth, time: document.getElementById('film').currentTime },
     details: document.getElementById('screen-diag').textContent,
     peers: await Promise.all(window.__audioTestPeers.map(async p => ({
@@ -85,6 +91,21 @@ async function receiving(page) {
   })));
   assert(received, `${engine}: receive rendered video and audio energy within 30 seconds`);
   console.log(`PASS ${engine}: rendered video and received nonzero audio energy over WebRTC`);
+}
+
+async function mediaProgress(page) {
+  return page.evaluate(async () => {
+    let frames = 0, energy = 0;
+    for (const peer of window.__audioTestPeers) {
+      if (peer.connectionState === 'closed') continue;
+      for (const r of (await peer.getStats()).values()) {
+        if (r.type !== 'inbound-rtp') continue;
+        frames += r.framesDecoded || 0;
+        energy += r.totalAudioEnergy || 0;
+      }
+    }
+    return { frames, energy, time: document.getElementById('film').currentTime };
+  });
 }
 
 (async () => {
@@ -103,9 +124,67 @@ async function receiving(page) {
     for (const page of [host, viewer]) page.on('console', msg => {
       if (msg.type() === 'warning' || msg.type() === 'error') console.error(msg.text());
     });
-    await host.goto(BASE);
+    // Cold load with deferred app setup held back: the home cards must not flash
+    // at desktop size before TV classification, authentication and fitting.
+    let releaseSetup;
+    const setupGate = new Promise(resolve => { releaseSetup = resolve; });
+    let releaseFont;
+    const fontGate = new Promise(resolve => { releaseFont = resolve; });
+    await host.route('**/app.js', async route => { await setupGate; await route.continue(); });
+    await host.route('**/fonts/inter-latin.woff2', async route => { await fontGate; await route.continue(); });
+    const navigation = host.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await host.waitForFunction(() => !!document.getElementById('screen-home'));
+    assert(await host.evaluate(() => document.documentElement.classList.contains('tv')), 'TV layout is classified before deferred setup');
+    assert(await host.locator('#screen-home').isHidden(), 'Uninitialised home cards remain hidden');
+    releaseSetup();
+    await navigation;
+    await host.unroute('**/app.js');
+    await host.locator('#screen-home:not([hidden])').waitFor();
+    // Force an actually late font response, beyond font-display: optional's
+    // brief initial window, rather than testing only a warm/fast font load.
+    await new Promise(resolve => setTimeout(resolve, 200));
+    const initialCards = await host.locator('.home-grid > .card').evaluateAll(cards => cards.map(c => {
+      const r = c.getBoundingClientRect(); return [r.x, r.y, r.width, r.height];
+    }));
+    releaseFont();
+    await host.evaluate(async () => { await document.fonts.ready; await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))); });
+    await host.unroute('**/fonts/inter-latin.woff2');
+    const settledCards = await host.locator('.home-grid > .card').evaluateAll(cards => cards.map(c => {
+      const r = c.getBoundingClientRect(); return [r.x, r.y, r.width, r.height];
+    }));
+    assert(initialCards.every((box, i) => box.every((v, j) => Math.abs(v - settledCards[i][j]) < 1)),
+      'Home card geometry stays stable after startup and font loading');
+    console.log(`PASS ${engine}: cold startup sizes TV cards before showing them, without a late font/layout jump`);
     await host.locator('[data-source="screen"]').click();
+    await host.locator('[data-quality="smooth"]').click();
+    for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 720 }]) {
+      await host.setViewportSize(viewport);
+      await host.evaluate(phone => document.documentElement.classList.toggle('tv', !phone), viewport.width < 600);
+      const boxes = await host.locator('[data-quality]').evaluateAll(buttons => buttons.map(b => {
+        const r = b.getBoundingClientRect(); return { w: r.width, h: r.height, y: r.top, fits: b.scrollWidth <= b.clientWidth && b.scrollHeight <= b.clientHeight };
+      }));
+      assert(boxes.every(b => b.w > 0 && Math.abs(b.w - boxes[0].w) < 1 && Math.abs(b.h - boxes[0].h) < 1 && Math.abs(b.y - boxes[0].y) < 1),
+        'Quality buttons have matching dimensions and alignment');
+      assert(boxes.every(b => b.fits), 'Quality labels fit inside their buttons');
+      const settings = await host.evaluate(() => {
+        const quality = document.querySelector('[aria-labelledby="quality-label"]').getBoundingClientRect();
+        const viewers = document.getElementById('max-viewers').getBoundingClientRect();
+        const sources = [...document.querySelectorAll('[data-source]')].map(b => b.getBoundingClientRect());
+        return { aligned: Math.abs(quality.top - viewers.top) < 1 && Math.abs(quality.height - viewers.height) < 1,
+          sources: sources.every(r => Math.abs(r.width - sources[0].width) < 1 && Math.abs(r.height - sources[0].height) < 1) };
+      });
+      assert(settings.aligned && settings.sources, 'Source buttons match; picture and viewer-count controls align at the same height');
+      await host.screenshot({ path: `/tmp/boxxie-ui-quality-${viewport.width}-${engine}.png` });
+    }
+    const actions = await host.evaluate(() => ['host-start', 'join-start'].map(id => {
+      const r = document.getElementById(id).getBoundingClientRect(); return { width:r.width, height:r.height, bottom:r.bottom };
+    }));
+    assert(actions.every(a => a.width > 0 && a.height > 0 && Math.abs(a.width - actions[0].width) < 1 && Math.abs(a.height - actions[0].height) < 1 && Math.abs(a.bottom - actions[0].bottom) < 1),
+      'Home actions match in size and baseline');
     await host.locator('#host-start').click();
+    assert.deepEqual(await host.evaluate(() => window.__lastShareConfig.quality),
+      { label: 'Smooth 720p', height: 720, width: 1280, maxBitrate: 2500000 },
+      'Smooth profile passes a 720p / 2.5 Mbps limit to the native engine');
     await host.locator('#code-tiles .tile').first().waitFor({ state: 'attached' });
     const code = (await host.locator('#code-tiles .tile').allTextContents()).join('');
     await viewer.goto(`${BASE}#join=${code}`);
@@ -170,6 +249,50 @@ async function receiving(page) {
       return !film.paused && !film.muted && document.getElementById('sound-on').hidden;
     });
     console.log(`PASS ${engine}: user gesture starts unmuted playback`);
+    await viewer.evaluate(() => document.getElementById('viewer-status').click());
+    await viewer.waitForFunction(() => document.getElementById('screen-diag').textContent.includes('Mbps received'));
+    await viewer.evaluate(() => document.getElementById('viewer-status').click());
+    console.log(`PASS ${engine}: viewer network diagnostics report measured receive bitrate`);
+
+    const tracksBefore = await viewer.evaluate(() => document.getElementById('film').srcObject.getTracks().map(t => t.id).sort());
+    const addsBefore = await host.evaluate(() => window.__nativeCalls.filter(c => c.startsWith('add:')).length);
+    await host.evaluate(() => window.__pauseHostPlayback(true));
+    await new Promise(resolve => setTimeout(resolve, 6500));
+    assert(await viewer.locator('#screen-room').isVisible(), 'Source pause keeps the viewer in the room');
+    // Browsers can pause the element during an interruption without ending tracks.
+    await viewer.evaluate(() => document.getElementById('film').pause());
+    await viewer.waitForFunction(() => !document.getElementById('film').paused);
+    const beforeResume = await mediaProgress(viewer);
+    await host.evaluate(() => window.__pauseHostPlayback(false));
+    const deadline = Date.now() + 15000;
+    let resumed = false;
+    while (Date.now() < deadline) {
+      const current = await mediaProgress(viewer);
+      if (current.frames > beforeResume.frames + 5 && current.energy > beforeResume.energy + 0.001 && current.time > beforeResume.time + 0.3) {
+        resumed = true; break;
+      }
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
+    assert(resumed, 'Host resume restores advancing video, audio energy and element playback');
+    assert.deepEqual(await viewer.evaluate(() => document.getElementById('film').srcObject.getTracks().map(t => t.id).sort()), tracksBefore,
+      'Pause/resume reuses the existing tracks');
+    assert.equal(await host.evaluate(() => window.__nativeCalls.filter(c => c.startsWith('add:')).length), addsBefore,
+      'An intentional source pause does not rebuild the media connection');
+    console.log(`PASS ${engine}: host pause/resume and interrupted viewer playback recover on existing tracks`);
+
+    // A failed media path can coexist with a healthy room socket. Repair just
+    // this viewer's screen peer, without new host approval or a room reload.
+    await viewer.evaluate(() => {
+      const pc = window.__audioTestPeers.find(p => p.connectionState !== 'closed' && p.oniceconnectionstatechange);
+      if (!pc) throw new Error('Screen peer missing');
+      Object.defineProperty(pc, 'iceConnectionState', { value: 'failed', configurable: true });
+      pc.dispatchEvent(new Event('iceconnectionstatechange'));
+    });
+    await host.waitForFunction(expected => window.__nativeCalls.filter(c => c.startsWith('add:')).length === expected, addsBefore + 1);
+    await receiving(viewer);
+    assert.equal(await host.evaluate(() => window.__nativeCalls.filter(c => c.startsWith('add:')).length), addsBefore + 1);
+    assert.equal(await host.locator('#request-list .allow').count(), 0);
+    console.log(`PASS ${engine}: failed screen connection recovers without leaving the room`);
 
     // Restart the native session: viewer must accept fresh audio/video tracks.
     await host.locator('#stage').dispatchEvent('mousemove');
@@ -223,7 +346,14 @@ async function receiving(page) {
     await viewer.locator('#screen-home:not([hidden])').waitFor();
     assert.equal(await viewer.evaluate(() => sessionStorage.getItem('bx:viewerRoom')), null,
       'Explicit leave must not auto-rejoin');
+    await viewer.evaluate(async () => {
+      const input = document.getElementById('join-code');
+      input.focus();
+      await new Promise(resolve => setTimeout(resolve, 80));
+      if (document.activeElement !== input) throw new Error('Delayed autofocus stole the room-code input focus');
+    });
     await viewer.locator('#join-code').fill(code);
+    assert.equal((await viewer.locator('#join-code').inputValue()).replace(/-/g, ''), code);
     await viewer.locator('#join-start').click();
     await receiving(viewer);
     console.log(`PASS ${engine}: explicit leave stays out after reload; manual rejoin still works`);

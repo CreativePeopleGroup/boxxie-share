@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https: wss:; media-src 'self' blob: mediastream:; img-src 'self' data: blob: https:; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; connect-src 'self' https: wss:; media-src 'self' blob: mediastream:; img-src 'self' data: blob: https:; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <title>Boxxie Share</title>
   <meta name="description" content="Watch your own films together. Share a code, approve who joins, talk on video while you watch.">
@@ -14,9 +14,8 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+  <script src="layout.js"></script>
+  <link rel="preload" href="fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="style.css">
   <script src="config.js"></script>
   <script src="qr.js" defer></script>
@@ -59,7 +58,7 @@
   <main id="main">
 
   <!-- ============ Home: share on the left, join on the right ============ -->
-  <section class="screen home" id="screen-home" data-screen="home">
+  <section class="screen home" id="screen-home" data-screen="home" hidden>
     <header class="topbar">
       <h1 class="wordmark"><img src="icons/boxxie-logo.png" alt="boxxie" width="405" height="160"><span class="share">share</span></h1>
       <div class="account" id="account">
@@ -113,8 +112,9 @@
           <div class="field">
             <span class="label" id="quality-label">Picture</span>
             <div class="segmented" role="radiogroup" aria-labelledby="quality-label">
+              <button type="button" role="radio" aria-checked="false" data-quality="smooth">Smooth 720p</button>
               <button type="button" role="radio" aria-checked="true" data-quality="hd">HD 1080p</button>
-              <button type="button" role="radio" aria-checked="false" data-quality="4k">4K Ultra HD</button>
+              <button type="button" role="radio" aria-checked="false" data-quality="4k" aria-label="4K Ultra HD">4K</button>
             </div>
             <small class="note" id="quality-note"></small>
           </div>

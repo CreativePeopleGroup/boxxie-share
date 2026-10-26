@@ -39,6 +39,11 @@ jobs:
             google-chrome --version
             echo "CHROME_PATH=$chrome_path" >> "$GITHUB_ENV"
           else
+            # Some hosted runners select a severely throttled Azure package
+            # mirror. Keep the same signed Ubuntu packages on the official mirror.
+            if [ -f /etc/apt/apt-mirrors.txt ]; then
+              printf '%s\n' 'https://archive.ubuntu.com/ubuntu' | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
+            fi
             npx playwright install --with-deps chromium ${{ matrix.browser }}
           fi
       - name: Test received audio, playback refusal and sharing restart

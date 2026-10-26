@@ -4,14 +4,17 @@
 (() => {
   try { delete MediaDevices.prototype.getDisplayMedia; } catch (e) {}
   const emit = (ev) => setTimeout(() => window.boxxieNativeEvent && window.boxxieNativeEvent(JSON.stringify(ev)), 0);
-  let ice = [], stream = null, session = null, timer = null;
+  let ice = [], stream = null, session = null, timer = null, playbackPaused = false;
   const pcs = new Map();
   function makeStream() {
     const c = document.createElement("canvas"); c.width = 1280; c.height = 720;
     const g = c.getContext("2d"); let n = 0;
-    timer = setInterval(() => { n++; g.fillStyle = `hsl(${n % 360},60%,45%)`; g.fillRect(0, 0, 1280, 720); g.fillStyle = "#fff"; g.font = "64px sans-serif"; g.fillText("TV screen " + n, 80, 360); }, 33);
+    timer = setInterval(() => { if (playbackPaused) return; n++; g.fillStyle = `hsl(${n % 360},60%,45%)`; g.fillRect(0, 0, 1280, 720); g.fillStyle = "#fff"; g.font = "64px sans-serif"; g.fillText("TV screen " + n, 80, 360); }, 33);
     const s = c.captureStream(30);
-    const ac = new AudioContext(); const o = ac.createOscillator(); const d = ac.createMediaStreamDestination(); o.connect(d); o.start();
+    const ac = new AudioContext(); const o = ac.createOscillator(); const d = ac.createMediaStreamDestination();
+    const gain = ac.createGain(); o.connect(gain); gain.connect(d); o.start();
+    playbackPaused = false;
+    window.__pauseHostPlayback = paused => { playbackPaused = paused; gain.gain.value = paused ? 0 : 1; };
     s.addTrack(d.stream.getAudioTracks()[0]);
     return s;
   }
@@ -20,6 +23,7 @@
     screenShareInfo: () => JSON.stringify({ available: true, audio: true, sdk: 34 }),
     startScreenShare: (cfg) => {
       window.__nativeCalls.push("start");
+      window.__lastShareConfig = JSON.parse(cfg);
       try { ice = JSON.parse(cfg).iceServers || []; } catch (e) {}
       if (window.__denyNext) { window.__denyNext = false; return emit({ type: "denied" }); }
       stream = makeStream(); session = Math.random().toString(36).slice(2);

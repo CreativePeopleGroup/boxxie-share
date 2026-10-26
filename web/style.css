@@ -1,6 +1,14 @@
 /* Boxxie Share: Apple-clean, FaceTime glass + Studio sidebar, in the Seashell Garnet Afternoon palette.
    The film is always the hero: it fills the screen, the call sits in small faces or on the paired phone,
    and every control floats in glass and fades away while it plays. */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: optional;
+  src: url("fonts/inter-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
 :root {
   --sand: #efcb99;
   --rose: #ca99a6;
@@ -117,6 +125,7 @@ input::placeholder { color: var(--faint); }
 /* iOS segmented control */
 .segmented { display: flex; background: var(--raised); border-radius: 12px; padding: 3px; gap: 3px; }
 .segmented button { flex: 1; background: transparent; min-height: 38px; border-radius: 9px; color: var(--muted); font-size: 0.92rem; }
+[aria-labelledby="quality-label"] button { flex: 1 1 0; min-width: 0; }
 .segmented button[aria-checked="true"] { background: var(--chosen); color: #fff; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3); }
 .segmented.mini button { min-height: 30px; font-size: 0.8rem; padding: 0 0.6em; }
 
@@ -805,6 +814,13 @@ textarea:focus { border-color: rgba(239, 203, 153, 0.6); outline: none; }
 .screen-diag.corner { top: auto; bottom: 12px; transform: translateX(-50%); font-size: 0.82rem; padding: 10px 14px; }
 .health-col { display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
 .screen-host .stage-empty-in { width: 100%; max-width: 1160px; }
+.opts-row { --picture-control-height: 64px; }
+.opts-row [aria-labelledby="quality-label"] { height: var(--picture-control-height); box-sizing: border-box; }
+.opts-row [aria-labelledby="quality-label"] button { white-space: normal; min-height: 0; }
+.opts-row .field.inline select { height: var(--picture-control-height); min-height: var(--picture-control-height); }
+@media (max-width: 860px) {
+  .opts-row { --picture-control-height: 50px; }
+}
 .health-col .sound-tests { display: grid; grid-template-columns: 1fr; gap: 8px; }
 .health-col .sound-tests button { width: 100%; min-height: 42px; margin: 0; display: inline-flex; align-items: center; justify-content: center; }
 .health-col .sound-tests button[hidden] { display: none; }
