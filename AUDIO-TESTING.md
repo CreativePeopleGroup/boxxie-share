@@ -15,7 +15,7 @@ The existing H.264/VP8 video negotiation and WebRTC audio negotiation remain in 
 
 ## Automated checks
 
-`Audio browser compatibility` runs the server harness and a real WebRTC audio/video session from Chromium to Chromium, Firefox and WebKit. The Android bridge is simulated with a canvas and oscillator. The test requires received audio energy, rendered video, recovery from a refused play request, unmuted playback after a user gesture, and a fresh session after sharing restarts. It does not verify Android playback capture, audio hardware, lip sync, or actual Safari/iPhone devices.
+`Audio browser compatibility` runs the server harness and a real WebRTC audio/video session from Chromium to Chromium, Firefox and WebKit. The Android bridge is simulated with a canvas and oscillator. The test requires received audio energy, rendered video, recovery from a refused play request, unmuted playback after a user gesture, and a fresh session after sharing restarts. Both test browsers use local ICE with no public STUN/TURN dependency. This does not verify cross-network relay, Android playback capture, audio hardware, lip sync, or actual Safari/iPhone devices.
 
 Local command, after installing Playwright and browser engines and starting the dev server:
 

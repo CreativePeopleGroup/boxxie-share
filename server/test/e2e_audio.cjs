@@ -8,7 +8,7 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8788/';
 const engine = process.env.BOXXIE_BROWSER || 'chromium';
 const engines = { chromium, firefox, webkit };
 assert(engines[engine], `Unknown browser: ${engine}`);
-const args = ['--autoplay-policy=no-user-gesture-required'];
+const args = ['--autoplay-policy=no-user-gesture-required', '--disable-features=WebRtcHideLocalIpsWithMdns'];
 const chromeOptions = { args, ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : {}) };
 const bridge = readFileSync(`${__dirname}/fake_native.js`, 'utf8');
 
@@ -26,9 +26,15 @@ async function signedInPage(browser, name, options = {}) {
     localStorage.setItem('bx:session', JSON.stringify({ token, user }));
     const NativePeer = window.RTCPeerConnection;
     window.__audioTestPeers = [];
-    window.RTCPeerConnection = class extends NativePeer {
-      constructor(...args) { super(...args); window.__audioTestPeers.push(this); }
-    };
+    window.RTCPeerConnection = new Proxy(NativePeer, {
+      // Both browsers run on this machine: use local ICE, independent of public
+      // STUN/TURN availability. Cross-network relay coverage needs a separate test.
+      construct(Target, [config]) {
+        const peer = new Target({ ...config, iceServers: [] });
+        window.__audioTestPeers.push(peer);
+        return peer;
+      },
+    });
   }, { token: session.token, user: session.user });
   return context.newPage();
 }
@@ -70,7 +76,8 @@ async function receiving(page) {
   let hostBrowser, viewerBrowser;
   try {
     hostBrowser = await chromium.launch(chromeOptions);
-    viewerBrowser = await engines[engine].launch(engine === 'chromium' ? chromeOptions : {});
+    viewerBrowser = await engines[engine].launch(engine === 'chromium' ? chromeOptions :
+      engine === 'firefox' ? { firefoxUserPrefs: { 'media.peerconnection.ice.obfuscate_host_addresses': false } } : {});
     const host = await signedInPage(hostBrowser, 'Audio host', {
       userAgent: 'Mozilla/5.0 (Linux; Android 11; AFTKA) AppleWebKit/537.36 Chrome/130.0 Safari/537.36 BoxxieShareTV/1',
     });
@@ -89,7 +96,18 @@ async function receiving(page) {
     await viewer.goto(`${BASE}#join=${code}`);
     await viewer.locator('#join-start').click();
     await host.locator('#request-list .allow').click();
-    await receiving(viewer);
+    try {
+      await receiving(viewer);
+    } catch (error) {
+      console.error('Sender connection details', JSON.stringify(await host.evaluate(async () =>
+        Promise.all(window.__audioTestPeers.map(async p => ({
+          state: p.connectionState, ice: p.iceConnectionState, signal: p.signalingState,
+          localSet: !!p.localDescription, remoteSet: !!p.remoteDescription,
+          stats: [...(await p.getStats()).values()].filter(r => r.type === 'outbound-rtp'),
+        })))), null, 2));
+      console.error('Browser errors', errors);
+      throw error;
+    }
 
     // Reproduce a browser refusing play(): the retry control must remain available.
     await viewer.evaluate(async () => {
