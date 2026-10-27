@@ -81,10 +81,33 @@
     },
     signal: async (id, json) => {
       const pc = pcs.get(id); if (!pc) return;
+      try {
       const d = JSON.parse(json);
       if (d.session && d.session !== session) return;
+      if (d.displayHeight !== undefined) {
+        window.__lastDisplayHeight = d.displayHeight;
+        const quality = window.__lastShareConfig && window.__lastShareConfig.quality;
+        if (quality) {
+          const limits = window.BoxxieQuality.limits(quality, d.displayHeight);
+          for (const sender of pc.getSenders()) {
+            if (!sender.track || sender.track.kind !== "video") continue;
+            const params = sender.getParameters();
+            for (const encoding of params.encodings || []) {
+              encoding.maxBitrate = limits.maxBitrate;
+              encoding.scaleResolutionDownBy = Math.max(1, (sender.track.getSettings().height || limits.height) / limits.height);
+            }
+            await sender.setParameters(params);
+          }
+        }
+      }
       if (d.sdp) await pc.setRemoteDescription(d.sdp);
       else if (d.candidate) await pc.addIceCandidate(d.candidate).catch(() => {});
+      } catch (error) {
+        // A host reconnect may replace this simulated engine's peer while a
+        // live quality update is awaiting setParameters. Ignore only stale work.
+        if (pcs.get(id) !== pc || pc.signalingState === "closed") return;
+        throw error;
+      }
     },
     removeViewer: (id) => { window.__nativeCalls.push("remove:" + id); const pc = pcs.get(id); if (pc) pc.close(); pcs.delete(id); },
     stopScreenShare: () => {

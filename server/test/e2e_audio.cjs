@@ -226,7 +226,7 @@ async function mediaProgress(page) {
     if (networkTest) await host.locator('[data-quality="auto"]').click();
     await host.locator('#host-start').click();
     assert.deepEqual(await host.evaluate(() => window.__lastShareConfig.quality),
-      networkTest ? { label: 'Auto 1080p', height: 1080, width: 1920, maxBitrate: 4000000, automatic: true }
+      networkTest ? { label: 'Auto 1080p', height: 1080, width: 1920, maxBitrate: 8000000, automatic: true }
         : { label: 'Smooth 720p', height: 720, width: 1280, maxBitrate: 2500000 },
       'The selected profile reaches the native bridge with its correct limits');
     await host.locator('#code-tiles .tile').first().waitFor({ state: 'attached' });
@@ -264,6 +264,17 @@ async function mediaProgress(page) {
     try {
       await receiving(viewer);
       await viewer.setViewportSize({ width: 390, height: 844 });
+      await host.evaluate(() => { window.__lastDisplayHeight = null; });
+      await viewer.locator('#viewer-display').selectOption('tv');
+      await host.waitForFunction(() => window.__lastDisplayHeight === 1080);
+      const videoCaps = await host.evaluate(() => window.__audioTestPeers
+        .filter(pc => pc.connectionState === 'connected')
+        .flatMap(pc => pc.getSenders()).filter(sender => sender.track?.kind === 'video')
+        .flatMap(sender => sender.getParameters().encodings || []).map(e => e.maxBitrate));
+      assert(videoCaps.includes(networkTest ? 8000000 : 2500000),
+        'TV preference applies the Auto budget and preserves manual host quality');
+      assert.equal(await viewer.evaluate(() => localStorage.getItem('bx:displayMode')), '"tv"');
+      assert(await viewer.locator('#screen-room').isVisible(), 'Changing display preference keeps the room');
       await viewer.screenshot({ path: `/tmp/boxxie-ui-phone-${engine}.png` });
     } catch (error) {
       console.error('Sender connection details', JSON.stringify(await host.evaluate(async () =>
@@ -357,6 +368,17 @@ async function mediaProgress(page) {
     assert.equal(await host.locator('#request-list .allow').count(), 0, 'Refresh needs no new approval');
     assert.equal(await host.locator('#viewer-health li').count(), 1, 'Refreshed viewer appears only once');
     console.log(`PASS ${engine}: refresh restores account and approved room while locked`);
+
+    // A brief host signalling interruption must not claim the host has dropped
+    // or eject the viewer while changing players. Exercise the real host socket.
+    await host.evaluate(() => window.__testSockets.filter(w =>
+      w.url.includes('/api/rooms/') && w.readyState === 1).forEach(w => w.close()));
+    await viewer.waitForFunction(() => document.getElementById('banner').textContent.includes("Waiting for the host's video"));
+    assert(await viewer.locator('#screen-room').isVisible(), 'Host interruption keeps the viewer in the room');
+    await viewer.waitForFunction(() => document.getElementById('banner').hidden);
+    await receiving(viewer);
+    assert.equal(await host.locator('#request-list .allow').count(), 0, 'Host recovery needs no new approval');
+    console.log(`PASS ${engine}: brief host interruption preserves room and resumes media`);
 
     // Exercise a failed ticket fetch during a disconnect, then simultaneous wake/online events.
     await viewer.route('**/api/ticket', route => route.abort());

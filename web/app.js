@@ -16,7 +16,7 @@
   // Picture quality. Bitrate is per friend, sent from the host's home connection.
   // If the connection can't keep up, WebRTC steps the picture down automatically.
   const QUALITY = {
-    auto: { label: "Auto 1080p", height: 1080, width: 1920, maxBitrate: 4_000_000, automatic: true },
+    auto: { label: "Auto 1080p", height: 1080, width: 1920, maxBitrate: 8_000_000, automatic: true },
     smooth: { label: "Smooth 720p", height: 720, width: 1280, maxBitrate: 2_500_000 },
     hd: { label: "HD 1080p", height: 1080, width: 1920, maxBitrate: 8_000_000 },
     "4k": { label: "4K Ultra HD", height: 2160, width: 3840, maxBitrate: 25_000_000 },
@@ -100,6 +100,9 @@
   function show(name) {
     document.querySelectorAll(".screen").forEach((s) => (s.hidden = s.dataset.screen !== name));
     fitTV();
+    // The first screen has its final dimensions before the loading layer leaves.
+    $("main").removeAttribute("inert");
+    $("startup")?.remove();
     const target = document.querySelector(`[data-screen="${name}"]`);
     const first = target && (target.querySelector("[data-autofocus]") || target.querySelector("button:not([hidden]), input:not([type=hidden]):not(.visually-hidden)"));
     // Focus before showing the next frame. A delayed focus can steal keystrokes
@@ -107,6 +110,7 @@
     if (first && (isTV || name !== "room")) first.focus();
   }
 
+  let hostAwayTimer;
   let toastTimer;
   function toast(text, ms = 3500) {
     const t = $("toast");
@@ -742,7 +746,7 @@
   document.querySelectorAll("[data-source]").forEach((b) => (b.onclick = () => setSource(b.dataset.source)));
   setSource(canHost ? "file" : "screen");
   const qualityNotes = {
-    auto: "Automatically adjusts to each connection, up to 1080p and 4 Mbps of video per friend. Favours smooth motion by reducing resolution when needed.",
+    auto: "Adapts to each friend's display and connection, up to 1080p and 8 Mbps of video per friend on larger screens. Favours smooth motion when the connection or device is busy.",
     "4k": "4K needs about 25 Mbps of upload for each friend, so it suits 1–2 friends on full-fibre broadband, with a 4K film or screen. If your connection can't keep up, the picture steps down by itself.",
     smooth: "Uses up to 2.5 Mbps of video upload per friend, plus sound and network overhead. Try this for remote viewers, VPNs or a choppy picture.",
     hd: "Up to 8 Mbps of video upload per friend, plus sound and network overhead. Choose Smooth 720p if the picture is choppy.",
@@ -1559,7 +1563,7 @@
           await pc.setRemoteDescription(data.sdp);
           if (data.sdp.type === "offer") {
             await pc.setLocalDescription(await pc.createAnswer());
-            send({ type: "signal", to: from, data: { ch: "screen", session: sp.session, sdp: { type: pc.localDescription.type, sdp: pc.localDescription.sdp } } });
+            send({ type: "signal", to: from, data: { ch: "screen", session: sp.session, displayHeight: receiverDisplayHeight(), sdp: { type: pc.localDescription.type, sdp: pc.localDescription.sdp } } });
           }
           for (const c of sp.pending.splice(0)) await pc.addIceCandidate(c).catch(() => {});
         } else if (data.candidate) {
@@ -1709,6 +1713,7 @@
   // ----- Coming back after the phone locks or loses signal -----
   // The server lets people the host already let in straight back in, so this is seamless.
   function rejoinSoon() {
+    clearTimeout(hostAwayTimer);
     if (!S.rejoinSince) S.rejoinSince = Date.now();
     if (Date.now() - S.rejoinSince > 15 * 60 * 1000) {
       S.rejoinSince = null;
@@ -1853,9 +1858,17 @@
         applyRemote(m.action, m.by);
         return;
       case "host-away":
-        banner("The host's connection dropped. Waiting for them to come back…");
+        // Switching players can briefly interrupt signalling while the media
+        // connection remains usable. Keep the room and its existing tracks.
+        clearTimeout(hostAwayTimer);
+        banner("Waiting for the host's video. Stay here—the room is still open.");
+        hostAwayTimer = setTimeout(() => {
+          if (S.role === "viewer" && !S.closing)
+            banner("Reconnecting to the host. Stay here—we'll resume when they're back.");
+        }, 10000);
         return;
       case "host-back":
+        clearTimeout(hostAwayTimer);
         banner("");
         resetPeer("host");
         return;
@@ -1903,6 +1916,7 @@
     $("quality-tag").hidden = !host;
     $("screen-controls").hidden = !host || S.source !== "screen";
     $("viewer-controls").hidden = host;
+    $("viewer-display-control").hidden = host || !!S.companion;
     $("requests").hidden = true;
     $("chat-log").replaceChildren();
     $("cams").replaceChildren();
@@ -2346,11 +2360,13 @@
     }
     // If both sides changed tracks at once, one offer is dropped. Re-offer so nothing is lost.
     afterExchange() {
+      if (S.role === "host" && !S.companionOf.has(this.id)) applyViewerLimits(this);
       if (!this.retryOffer || this.pc.signalingState !== "stable") return;
       this.retryOffer = false;
       setTimeout(() => this.negotiate(), 50);
     }
     signal(data) {
+      if (S.role === "viewer" && this.id === "host") data = { ...data, displayHeight: receiverDisplayHeight() };
       send({ type: "signal", to: this.id, data });
     }
     // Handle this person's messages strictly one after another. Running them in parallel
@@ -2362,6 +2378,11 @@
     async handleSignal(data) {
       const pc = this.pc;
       try {
+        if (S.role === "host" && !S.companionOf.has(this.id) && data.displayHeight !== undefined) {
+          this.displayHeight = data.displayHeight >= 1080 ? 1080 : 720;
+          applyViewerLimits(this);
+        }
+        if (data.displayOnly) return;
         if (data.kinds) {
           Object.assign(this.kinds, data.kinds);
           return;
@@ -2462,6 +2483,24 @@
   }
 
   // Host: make sure each viewer is receiving the current film tracks.
+  function applyViewerLimits(p) {
+    const q = window.BoxxieQuality.limits(quality(), p.displayHeight);
+    // Serialize updates: resize and negotiation can otherwise race setParameters.
+    p.qualityUpdate = (p.qualityUpdate || Promise.resolve()).then(async () => {
+      for (const sender of p.filmSenders.values()) {
+        if (!sender.track || sender.track.kind !== "video") continue;
+        try {
+          const params = sender.getParameters();
+          const height = sender.track.getSettings?.().height || filmVideo.videoHeight || q.height;
+          for (const encoding of params.encodings || []) {
+            encoding.maxBitrate = q.maxBitrate;
+            encoding.scaleResolutionDownBy = Math.max(1, height / q.height);
+          }
+          await sender.setParameters(params);
+        } catch {} // Browsers that reject live changes retain negotiated limits.
+      }
+    }).catch(() => {});
+  }
   function syncFilm(p) {
     if (!S.filmStream) return;
     const tracks = S.filmStream.getTracks();
@@ -2469,7 +2508,7 @@
     for (const t of tracks) {
       if (p.filmSenders.has(t.id)) continue;
       if (t.kind === "video") t.contentHint = "motion";
-      const Q = quality();
+      const Q = window.BoxxieQuality.limits(quality(), p.displayHeight);
       // Never send more than the chosen quality (a 4K film in HD mode is scaled to 1080p).
       const srcHeight = (t.getSettings && t.getSettings().height) || filmVideo.videoHeight || Q.height;
       const scale = srcHeight > Q.height ? srcHeight / Q.height : 1;
@@ -2588,10 +2627,45 @@
   function qualityName(h) {
     return h >= 2000 ? "4K" : h >= 1400 ? "1440p" : h >= 1000 ? "1080p" : h >= 700 ? "720p" : h ? h + "p" : "";
   }
+  function receiverDisplayHeight() {
+    return window.BoxxieQuality.displayHeight({
+      width: Math.max(innerWidth, screen.width || 0),
+      height: Math.max(innerHeight, screen.height || 0),
+      tv: isTV, mode: $("viewer-display").value,
+    });
+  }
+  function requestDisplayQuality() {
+    if (S.role !== "viewer" || S.companion) return;
+    const displayHeight = receiverDisplayHeight();
+    if (screenPeers.has("host")) {
+      const sp = screenPeers.get("host");
+      send({ type: "signal", to: "host", data: { ch: "screen", session: sp.session, displayHeight } });
+    } else if (S.peers.has("host")) {
+      S.peers.get("host").signal({ displayOnly: true, displayHeight });
+    }
+  }
+  $("viewer-display").value = store.get("displayMode") === "tv" ? "tv" : "auto";
+  $("viewer-display").addEventListener("change", () => {
+    store.set("displayMode", $("viewer-display").value);
+    requestDisplayQuality();
+    toast("Display preference sent. Quality still depends on the host and connection.");
+  });
+  let displayResizeTimer;
+  addEventListener("resize", () => {
+    clearTimeout(displayResizeTimer);
+    displayResizeTimer = setTimeout(requestDisplayQuality, 300);
+  });
+  document.addEventListener("fullscreenchange", requestDisplayQuality);
+  filmVideo.addEventListener("webkitcurrentplaybacktargetiswirelesschanged", () => {
+    if (filmVideo.webkitCurrentPlaybackTargetIsWireless) {
+      $("viewer-display").value = "tv";
+      requestDisplayQuality();
+    }
+  });
   function updateViewerQuality() {
     if (S.role !== "viewer") return;
     const q = qualityName(filmVideo.videoHeight);
-    $("viewer-status").textContent = q ? `Live from the host · ${q}` : "Live from the host";
+    $("viewer-status").textContent = q ? `Live from the host · receiving ${q}` : "Live from the host";
   }
   filmVideo.addEventListener("resize", () => {
     updateViewerQuality();
@@ -3020,6 +3094,7 @@
 
   function cleanup() {
     S.closing = true;
+    clearTimeout(hostAwayTimer);
     screenRestartAt.clear();
     connectionEpoch++;
     connectionPending = false;

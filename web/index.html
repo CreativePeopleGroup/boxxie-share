@@ -17,11 +17,18 @@
   <script src="layout.js"></script>
   <link rel="preload" href="fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="style.css">
+  <link rel="preload" href="icons/boxxie-logo.png" as="image">
   <script src="config.js"></script>
   <script src="qr.js" defer></script>
+  <script src="quality-policy.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
+  <div id="startup" class="startup" role="status" aria-live="polite">
+    <img src="icons/boxxie-logo.png" alt="Boxxie" width="405" height="160" fetchpriority="high">
+    <span class="startup-label">Loading Boxxie Share…</span>
+    <span class="startup-progress" aria-hidden="true"></span>
+  </div>
   <!-- Icons (drawn for Boxxie Share) -->
   <svg class="sprite" width="0" height="0" aria-hidden="true" focusable="false">
     <defs>
@@ -55,7 +62,7 @@
       <symbol id="i-playpause" viewBox="0 0 24 24"><path d="M3.5 6v12l8-6z" fill="currentColor"/><rect x="13.5" y="6" width="2.6" height="12" rx="1" fill="currentColor"/><rect x="18.2" y="6" width="2.6" height="12" rx="1" fill="currentColor"/></symbol>
     </defs>
   </svg>
-  <main id="main">
+  <main id="main" inert>
 
   <!-- ============ Home: share on the left, join on the right ============ -->
   <section class="screen home" id="screen-home" data-screen="home" hidden>
@@ -420,6 +427,12 @@
           <div class="controls" id="viewer-controls" hidden>
             <span class="live-dot" aria-hidden="true"></span>
             <span id="viewer-status">Live from the host</span>
+            <label class="viewer-display" id="viewer-display-control">Watching on
+              <select id="viewer-display" aria-label="Playback display">
+                <option value="auto">Auto · this screen</option>
+                <option value="tv">TV / AirPlay</option>
+              </select>
+            </label>
           </div>
         </div>
       </div>
