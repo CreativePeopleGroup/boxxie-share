@@ -68,6 +68,7 @@ jobs:
           set -o pipefail
           if ! gradle -p android assembleDirectRelease bundlePlayRelease \
             -PappUrl="${{ steps.url.outputs.value }}" \
+            -PserverUrl="${{ vars.SERVER_URL || 'https://boxxie-share-server.ricky-kundi.workers.dev' }}" \
             -PversionCode=${{ github.run_number }} \
             -PversionName=1.0.${{ github.run_number }} \
             -PupdateUrl="https://github.com/${{ github.repository }}/releases/latest/download/" 2>&1 | tee build.log; then

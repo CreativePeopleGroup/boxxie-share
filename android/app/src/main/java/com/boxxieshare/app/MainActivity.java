@@ -101,6 +101,7 @@ public class MainActivity extends Activity {
         // running: by default Android lets a hidden web page's process be killed to save memory.
         if (Build.VERSION.SDK_INT >= 26) web.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
         s.setJavaScriptEnabled(true);
+        s.setCacheMode(WebSettings.LOAD_NO_CACHE); // Revalidate the room adapter after an APK update.
         s.setDomStorageEnabled(true);
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setAllowFileAccess(false);
@@ -595,6 +596,7 @@ public class MainActivity extends Activity {
                 o.put("sdk", Build.VERSION.SDK_INT);
                 o.put("tv", isTv());
                 o.put("automaticQuality", true);
+                o.put("roomConnection", true);
                 o.put("manufacturer", Build.MANUFACTURER);
                 o.put("model", Build.MODEL);
                 o.put("androidVersion", Build.VERSION.RELEASE);
@@ -617,6 +619,15 @@ public class MainActivity extends Activity {
         public void setIceServers(String json) {
             if (ourPage) engine.setIceServers(json);
         }
+
+        @JavascriptInterface
+        public boolean connectRoom(String json) { return ourPage && engine.connectRoom(json); }
+
+        @JavascriptInterface
+        public void sendRoom(String id, String json) { if (ourPage) engine.sendRoom(id, json); }
+
+        @JavascriptInterface
+        public void disconnectRoom(String id) { if (ourPage) engine.disconnectRoom(id); }
 
         @JavascriptInterface
         public void addViewer(String id) {
@@ -771,9 +782,12 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         if (updater != null) updater.release();
-        if (engine != null && isFinishing()) {
+        if (engine != null) {
             engine.setListener(null);
-            engine.stop();
+            if (isFinishing()) {
+                engine.disconnectRoom();
+                engine.stop();
+            }
         }
         if (Build.VERSION.SDK_INT >= 33 && backCallback != null) {
             getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(backCallback);

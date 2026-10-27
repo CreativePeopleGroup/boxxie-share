@@ -50,6 +50,15 @@ async function signedInPage(browser, name, options = {}) {
     });
     const NativePeer = window.RTCPeerConnection;
     window.__audioTestPeers = [];
+    window.__readMediaStats = peer => new Promise(resolve => {
+      let done = false;
+      const finish = value => { if (!done) { done = true; clearInterval(watch); clearTimeout(limit); resolve(value); } };
+      // A peer can close between the state check and getStats completing.
+      // Still require received energy/frames, but don't wait forever on a retired negotiation.
+      const watch = setInterval(() => { if (peer.signalingState === 'closed') finish(null); }, 50);
+      const limit = setTimeout(() => finish(null), 2000);
+      peer.getStats().then(finish, () => finish(null));
+    });
     window.RTCPeerConnection = new Proxy(NativePeer, {
       // Both browsers run on this machine: use local ICE, independent of public
       // STUN/TURN availability. Cross-network relay coverage needs a separate test.
@@ -71,9 +80,13 @@ async function receiving(page) {
     const video = document.getElementById('film');
     if (!video.srcObject || !video.videoWidth || video.currentTime < 0.3 ||
         !video.srcObject.getAudioTracks().some(t => t.readyState === 'live')) return false;
+    const tracks = new Set(video.srcObject.getTracks().filter(t => t.readyState === 'live').map(t => t.id));
     for (const peer of window.__audioTestPeers) {
-      if (peer.connectionState === 'closed') continue;
-      const stats = await peer.getStats();
+      // Call peers and retired negotiations do not carry the film. In Firefox
+      // an unrelated/empty peer's getStats can remain pending after recovery.
+      if (peer.signalingState === 'closed' || !peer.getReceivers().some(r => r.track && tracks.has(r.track.id))) continue;
+      const stats = await window.__readMediaStats(peer);
+      if (!stats) continue;
       for (const r of stats.values()) {
         if (r.type === 'inbound-rtp' && (r.kind || r.mediaType) === 'audio' && r.bytesReceived > 0 &&
             (r.totalAudioEnergy > 0 || r.audioLevel > 0)) return true;
@@ -93,9 +106,9 @@ async function receiving(page) {
     sockets: window.__testSockets.map(s => s.readyState),
     video: { width: document.getElementById('film').videoWidth, time: document.getElementById('film').currentTime },
     details: document.getElementById('screen-diag').textContent,
-    peers: await Promise.all(window.__audioTestPeers.map(async p => ({
+    peers: await Promise.all(window.__audioTestPeers.filter(p => p.signalingState !== 'closed').map(async p => ({
       state: p.connectionState, ice: p.iceConnectionState, signal: p.signalingState,
-      stats: [...(await p.getStats()).values()].filter(r => ['inbound-rtp', 'candidate-pair'].includes(r.type)),
+      stats: [...((await window.__readMediaStats(p)) || new Map()).values()].filter(r => ['inbound-rtp', 'candidate-pair'].includes(r.type)),
     }))),
   })), 'read failed receive diagnostics'));
   assert(received, `${engine}: receive rendered video and audio energy within 30 seconds`);
@@ -105,9 +118,12 @@ async function receiving(page) {
 async function mediaProgress(page) {
   return bounded(page.evaluate(async () => {
     let frames = 0, energy = 0;
+    const tracks = new Set((document.getElementById('film').srcObject?.getTracks() || []).filter(t => t.readyState === 'live').map(t => t.id));
     for (const peer of window.__audioTestPeers) {
-      if (peer.connectionState === 'closed') continue;
-      for (const r of (await peer.getStats()).values()) {
+      if (peer.signalingState === 'closed' || !peer.getReceivers().some(r => r.track && tracks.has(r.track.id))) continue;
+      const stats = await window.__readMediaStats(peer);
+      if (!stats) continue;
+      for (const r of stats.values()) {
         if (r.type !== 'inbound-rtp') continue;
         frames += r.framesDecoded || 0;
         energy += r.totalAudioEnergy || 0;
@@ -467,9 +483,13 @@ async function mediaProgress(page) {
     const duringAfter = await mediaProgress(viewer);
     assert(duringAfter.frames > duringBefore.frames && duringAfter.energy > duringBefore.energy,
       'Existing picture and sound continue during host ticket failure');
-    await host.unroute('**/api/ticket');
-    await viewer.waitForFunction(() => document.getElementById('banner').textContent.includes("Waiting for the host's video"));
+    await viewer.waitForFunction(() => !document.getElementById('connection-notice').hidden);
     assert(await viewer.locator('#screen-room').isVisible(), 'Host interruption keeps the viewer in the room');
+    await viewer.locator('#connection-notice-hide').click();
+    assert(await viewer.locator('#connection-notice').isHidden(), 'Connection notice can be dismissed without leaving or stopping video');
+    await host.unroute('**/api/ticket');
+    await host.waitForFunction(() => document.getElementById('banner').hidden &&
+      window.__testSockets.some(w => w.url.includes('/api/rooms/') && w.readyState === 1));
     await viewer.waitForFunction(() => document.getElementById('banner').hidden);
     await receiving(viewer);
     assert.equal(await host.locator('#request-list .allow').count(), 0, 'Host recovery needs no new approval');

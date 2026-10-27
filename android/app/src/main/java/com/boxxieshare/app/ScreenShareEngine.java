@@ -77,6 +77,9 @@ public final class ScreenShareEngine {
     private final Context app;
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private volatile Listener listener;
+    private final NativeRoomConnection roomConnection;
+    private volatile String roomConnectionId = "";
+    private final Map<String, Long> roomRestartAt = new HashMap<>();
 
     private EglBase egl;
     private PeerConnectionFactory factory;
@@ -122,6 +125,99 @@ public final class ScreenShareEngine {
 
     private ScreenShareEngine(Context app) {
         this.app = app;
+        java.net.URI page = java.net.URI.create(BuildConfig.APP_URL);
+        String origin = page.getScheme() + "://" + page.getRawAuthority();
+        roomConnection = new NativeRoomConnection(BuildConfig.SERVER_URL, origin, new NativeRoomConnection.Listener() {
+            @Override public void message(String id, JSONObject m) {
+                worker.execute(() -> {
+                    if (!id.equals(roomConnectionId)) return;
+                    handleRoomMessage(m);
+                    emit(safe(safe(event("room-message"), "connectionId", id), "message", m));
+                });
+            }
+            @Override public void state(String id, String state, int code, String reason) {
+                worker.execute(() -> {
+                    if (!id.equals(roomConnectionId)) return;
+                    emit(safe(safe(safe(safe(event("room-state"), "connectionId", id), "state", state), "code", code), "reason", reason));
+                    if (state.equals("closed")) {
+                        roomConnectionId = "";
+                        stopCaptureInternal(true);
+                    }
+                });
+            }
+        });
+    }
+
+    public boolean connectRoom(String json) {
+        try {
+            JSONObject c = new JSONObject(json);
+            // The page cannot redirect its bearer token to a different server.
+            if (!BuildConfig.SERVER_URL.startsWith("https://") ||
+                    !c.getString("server").replaceAll("/+$", "").equals(BuildConfig.SERVER_URL.replaceAll("/+$", ""))) return false;
+            String id = c.getString("id"), code = c.getString("code"), secret = c.getString("hostToken"), bearer = c.getString("sessionToken");
+            if (id.isEmpty() || id.length() > 100 || !code.matches("[A-Z2-9]{8}") ||
+                    !secret.matches("[0-9a-fA-F]{64}") || !bearer.matches("[0-9a-fA-F]{64}")) return false;
+            roomConnectionId = id;
+            roomConnection.start(id, code, secret, bearer);
+            return true;
+        } catch (Exception ignored) { return false; }
+    }
+    public void sendRoom(String id, String json) {
+        if (roomConnectionId.equals(id) && json != null && json.length() <= 65536) roomConnection.send(id, json);
+    }
+    public void disconnectRoom(String id) {
+        if (!roomConnectionId.equals(id)) return;
+        roomConnectionId = "";
+        roomConnection.stop(id);
+    }
+    public void disconnectRoom() { disconnectRoom(roomConnectionId); }
+
+    private void handleRoomMessage(JSONObject m) {
+        try {
+            String type = m.optString("type");
+            if (type.equals("welcome")) {
+                setIce(m.optJSONArray("iceServers") == null ? new JSONArray() : m.getJSONArray("iceServers"));
+                roomRestartAt.clear();
+            }
+            else if (type.equals("viewer-ready") && m.isNull("companionOf")) {
+                String id = m.getString("id");
+                Viewer v = viewers.get(id);
+                // Keep healthy media tracks during signalling recovery.
+                if (v == null || v.ice.equals("failed") || v.ice.equals("disconnected") || v.ice.equals("closed")) connectViewer(id, false);
+            } else if (type.equals("roster")) {
+                // Reconcile after page recreation: a missed UI event must never
+                // leave a removed viewer receiving the native capture.
+                java.util.Set<String> approved = new java.util.HashSet<>();
+                JSONArray list = m.optJSONArray("viewers");
+                if (list != null) for (int i = 0; i < list.length(); i++) {
+                    JSONObject viewer = list.getJSONObject(i);
+                    if (!viewer.isNull("companionOf")) continue;
+                    String id = viewer.getString("id");
+                    approved.add(id);
+                    if (!viewers.containsKey(id)) connectViewer(id, false);
+                }
+                for (String id : new ArrayList<>(viewers.keySet())) if (!approved.contains(id)) {
+                    closeViewer(id, false);
+                    roomRestartAt.remove(id);
+                }
+            } else if (type.equals("viewer-left")) {
+                String id = m.getString("id");
+                closeViewer(id, false);
+                roomRestartAt.remove(id);
+            } else if (type.equals("signal")) {
+                JSONObject data = m.optJSONObject("data");
+                if (data == null || !data.optString("ch").equals("screen")) return;
+                String id = m.getString("from");
+                if (data.optBoolean("restart")) {
+                    long now = System.nanoTime();
+                    Long previous = roomRestartAt.get(id);
+                    if (previous == null || now - previous > TimeUnit.SECONDS.toNanos(10)) {
+                        roomRestartAt.put(id, now);
+                        connectViewer(id, false);
+                    }
+                } else signal(id, data.toString());
+            }
+        } catch (Exception ignored) {}
     }
 
     public void setListener(Listener l) {
@@ -894,6 +990,11 @@ public final class ScreenShareEngine {
     private void send(String peer, String sess, JSONObject data) {
         try {
             data.put("session", sess);
+            if (!roomConnectionId.isEmpty()) {
+                data.put("ch", "screen");
+                sendRoom(roomConnectionId, new JSONObject().put("type", "signal").put("to", peer).put("data", data).toString());
+                return;
+            }
             emit(event("signal").put("peer", peer).put("data", data));
         } catch (Exception ignored) {}
     }

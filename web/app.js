@@ -137,6 +137,18 @@
     b.textContent = text || "";
     b.hidden = !text;
   }
+  let connectionNoticeDismissed = false;
+  function connectionNotice(text) {
+    if (!text) connectionNoticeDismissed = false;
+    $("connection-notice-text").textContent = text || "";
+    $("connection-notice").hidden = !text || connectionNoticeDismissed;
+  }
+  $("connection-notice-hide").onclick = () => {
+    connectionNoticeDismissed = true;
+    $("connection-notice").hidden = true;
+    showControls();
+    $(S.role === "host" ? "help-open" : "ask-pause").focus();
+  };
   function showError(el, text) {
     el.textContent = text;
     el.hidden = !text;
@@ -1442,6 +1454,10 @@
     let ev;
     try { ev = typeof json === "string" ? JSON.parse(json) : json; } catch { return; }
     if (!ev) return;
+    if (ev.type === "room-state" || ev.type === "room-message") {
+      if (S.ws?.native) S.ws.receive(ev);
+      return;
+    }
     if (String(ev.type).startsWith("update")) return onUpdateEvent(ev);
     if (ev.type === "viewer-state" || ev.type === "viewer-stats" || ev.type === "audio-health") return onViewerHealth(ev);
     if (ev.type === "started" || ev.type === "denied") {
@@ -1485,6 +1501,7 @@
 
   // Viewer: the app's screen arrives on its own connection
   const screenPeers = new Map();
+  let sawHostScreen = false;
   const screenRestartAt = new Map();
   function restartScreenPeer(sp) {
     if (screenPeers.get(sp.from) !== sp || S.role !== "viewer" || S.closing ||
@@ -1621,6 +1638,7 @@
     }
   }
   function screenSignal(from, data) {
+    if (from === "host") sawHostScreen = true;
     let sp = screenPeers.get(from);
     // Older APKs reused their capture session ID for a replacement native peer.
     // SDP's origin session ID distinguishes that from an offer on the same peer.
@@ -1749,11 +1767,12 @@
     const epoch = ++connectionEpoch;
     connectionPending = true;
     S.closing = false;
-    const ticket = await getTicket();
+    const nativeRoom = S.role === "host" && S.nativeSharing && nativeInfo.roomConnection && window.BoxxieNativeRoomSocket;
+    const ticket = nativeRoom ? null : await getTicket();
     if (epoch !== connectionEpoch) return;
     connectionPending = false;
     if (S.closing || !S.role) return;
-    if (!ticket) {
+    if (!nativeRoom && !ticket) {
       if (S.session && S.role === "viewer") return rejoinSoon();
       if (S.session && S.role === "host") return reconnectHostSoon();
       return failConnect("signed_out");
@@ -1765,7 +1784,10 @@
         : `role=viewer`);
     let ws;
     try {
-      ws = new WebSocket(`${WS_SERVER}/api/rooms/${S.code}/ws?${q}`);
+      ws = nativeRoom ? new window.BoxxieNativeRoomSocket(NATIVE, {
+        id: `room-${epoch}-${Date.now()}`, server: SERVER, code: S.code,
+        hostToken: S.hostToken, sessionToken: S.session.token,
+      }) : new WebSocket(`${WS_SERVER}/api/rooms/${S.code}/ws?${q}`);
     } catch {
       if (S.role === "viewer") return rejoinSoon();
       return reconnectHostSoon();
@@ -1780,7 +1802,7 @@
       clearTimeout(S.hostReconnectTimer);
       S.reconnectTries = 0;
       clearInterval(S.pingTimer);
-      S.pingTimer = setInterval(() => send({ type: "ping" }), 25000);
+      if (!ws.native) S.pingTimer = setInterval(() => send({ type: "ping" }), 25000);
     };
     ws.onmessage = (ev) => {
       if (S.ws !== ws || S.closing) return;
@@ -1806,6 +1828,10 @@
       banner("You've been disconnected from the room.");
       if (S.role === "viewer") endWithMessage("Disconnected", "Your connection to the room dropped. Ask the host for the code and join again.");
     };
+    if (ws.native) {
+      ws.onretry = () => { if (S.ws === ws && !S.closing) connectionNotice("Room link reconnecting. Your player can stay open."); };
+      ws.start();
+    }
   }
 
   // ----- Coming back after the phone locks or loses signal -----
@@ -1839,6 +1865,7 @@
   function checkConnectionNow() {
     if (S.closing || !S.role) return;
     if (S.role === "host") {
+      if (S.ws?.native) return; // Android owns liveness and retries, including while this page sleeps.
       if (!S.ws || S.ws.readyState > 1) {
         clearTimeout(S.hostReconnectTimer);
         connect();
@@ -1872,6 +1899,13 @@
   setInterval(() => { if (S.role === "host") checkConnectionNow(); }, 15000);
 
   function failConnect(reason) {
+    if (S.role === "host" && S.ws?.native && ["signed_out", "origin_not_allowed", "too_many_attempts"].includes(reason)) {
+      forgetTVRoom();
+      endWithMessage(reason === "signed_out" ? "Sign in again" : "Room connection unavailable",
+        reason === "signed_out" ? "Your sign-in expired. Sign in and start a new room." : ERRORS[reason]);
+      S.role = null;
+      return;
+    }
     if (S.role === "host" && reason === "not_host") forgetTVRoom();
     if (S.role === "host") {
       if (["network", "signed_out"].includes(reason) && S.session) return reconnectHostSoon();
@@ -1894,12 +1928,32 @@
     if (S.ws && S.ws.readyState === 1) S.ws.send(JSON.stringify(m));
   }
 
+  // Room age comes from the server, not the viewer's join time or the film position.
+  let roomClock = null;
+  let roomClockTimer = null;
+  function renderRoomClock() {
+    if (!roomClock) return;
+    const seconds = Math.max(0, Math.floor((roomClock.age + Date.now() - roomClock.receivedAt) / 1000));
+    const parts = [Math.floor(seconds / 3600), Math.floor(seconds / 60) % 60, seconds % 60];
+    const clock = $("room-duration");
+    clock.textContent = `Open ${parts.map((n) => String(n).padStart(2, "0")).join(":")}`;
+    clock.hidden = false;
+  }
+  function syncRoomClock(m) {
+    if (!Number.isFinite(m.createdAt) || !Number.isFinite(m.serverNow) || m.createdAt <= 0 || m.serverNow < m.createdAt) return;
+    roomClock = { age: m.serverNow - m.createdAt, receivedAt: Date.now() };
+    renderRoomClock();
+    if (!roomClockTimer) roomClockTimer = setInterval(renderRoomClock, 1000);
+  }
+
   function onServer(m) {
+    if (m.type === "roster" || m.type === "peers") syncRoomClock(m);
     switch (m.type) {
       case "refused": // server said no before we got in (wrong code, too many tries…)
         S.refused = m.error;
         return;
       case "welcome": // host
+        connectionNotice("");
         S.ice = m.iceServers || [];
         if (S.native) try { NATIVE.setIceServers(JSON.stringify(S.ice)); } catch {}
         banner("");
@@ -1967,13 +2021,13 @@
         if (m.companionOf) S.companionOf.set(m.id, m.companionOf);
         else S.companionOf.delete(m.id);
         resetPeer(m.id);
-        if (S.nativeSharing && !m.companionOf) try { NATIVE.addViewer(m.id); } catch {}
+        if (S.nativeSharing && !S.ws?.native && !m.companionOf) try { NATIVE.addViewer(m.id); } catch {}
         return;
       case "viewer-left":
         health.delete(m.id);
         renderHealth();
         closePeer(m.id);
-        if (S.native) try { NATIVE.removeViewer(m.id); } catch {}
+        if (S.native && !S.ws?.native) try { NATIVE.removeViewer(m.id); } catch {}
         return;
       case "requests": // the host's paired phone: who's waiting to be let in
         renderRequests(m.pending);
@@ -1996,16 +2050,20 @@
         // Switching players can briefly interrupt signalling while the media
         // connection remains usable. Keep the room and its existing tracks.
         clearTimeout(hostAwayTimer);
-        banner("Waiting for the host's video. Stay here—the room is still open.");
+        connectionNotice("Room link interrupted. Video may continue while the host reconnects.");
         hostAwayTimer = setTimeout(() => {
           if (S.role === "viewer" && !S.closing)
-            banner("Reconnecting to the host. Stay here—we'll resume when they're back.");
+            connectionNotice("Room link still reconnecting. Video may continue.");
         }, 10000);
         return;
       case "host-back":
         clearTimeout(hostAwayTimer);
+        connectionNotice("");
         banner("");
         resetPeer("host");
+        // A repair request sent while the host was offline cannot reach it.
+        // Retry once the signalling path returns, without disturbing a healthy picture.
+        if (sawHostScreen && !screenPeers.has("host")) send({ type: "signal", to: "host", data: { ch: "screen", restart: true } });
         return;
       case "ending":
         showEnding(m.in, m.why);
@@ -2610,6 +2668,7 @@
     if (!data || typeof data !== "object") return;
     if (data.ch === "screen") {
       if (S.role === "host") {
+        if (S.ws?.native) return; // Android already handled this on its capture worker.
         if (data.restart) {
           if (S.nativeSharing && S.peers.has(from) && !S.companionOf.has(from)) {
             const now = Date.now();
@@ -3248,6 +3307,13 @@
   };
 
   function cleanup() {
+    sawHostScreen = false;
+    connectionNotice("");
+    clearInterval(roomClockTimer);
+    roomClockTimer = null;
+    roomClock = null;
+    $("room-duration").hidden = true;
+    $("room-duration").textContent = "";
     S.closing = true;
     health.clear();
     localAudioHealth = null;

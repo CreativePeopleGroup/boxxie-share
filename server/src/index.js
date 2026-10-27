@@ -584,14 +584,14 @@ export class Room extends DurableObject {
 
   async _pushRoster(meta) {
     const host = this._host();
-    if (host) this._send(host.ws, { ...this._roster(), locked: meta.locked, maxViewers: meta.maxViewers });
+    if (host) this._send(host.ws, { ...this._roster(), createdAt: meta.createdAt, serverNow: Date.now(), locked: meta.locked, maxViewers: meta.maxViewers });
     // Approved viewers get the full participant list so they can set up video calls with each other.
     const everyone = [
       ...(host ? [{ id: "host", name: meta.hostName, photo: host.a.photo || null, userId: host.a.userId || null, host: true }] : []),
       ...this._approved().map((s) => ({ id: s.a.id, name: s.a.name, photo: s.a.photo || null, userId: s.a.userId || null, companionOf: s.a.companionOf || null })),
     ];
     for (const v of this._approved()) {
-      this._send(v.ws, { type: "peers", you: v.a.id, peers: everyone.filter((p) => p.id !== v.a.id) });
+      this._send(v.ws, { type: "peers", createdAt: meta.createdAt, serverNow: Date.now(), you: v.a.id, peers: everyone.filter((p) => p.id !== v.a.id) });
     }
     // The host's paired phone sees who's waiting, so it can let them in.
     const pending = this._pending().map((s) => ({ id: s.a.id, name: s.a.name, photo: s.a.photo || null }));

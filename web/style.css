@@ -316,6 +316,9 @@ button.chip:hover { border-color: var(--no); }
 .stage-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); text-align: center; padding: 24px; font-size: 1.05rem; background: radial-gradient(640px 420px at 50% 50%, rgba(95, 131, 161, 0.2), transparent 70%); }
 .sound-on { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: var(--text); color: #0b1118; z-index: 7; min-height: 54px; padding: 0 1.6em; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); }
 .banner { position: absolute; top: 70px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 32px); background: var(--glass); border: 1px solid var(--hair-2); padding: 0.55em 1.1em; border-radius: 999px; z-index: 6; backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); font-size: 0.92rem; }
+.connection-notice { position: absolute; bottom: 12px; left: 12px; right: 12px; max-width: 640px; z-index: 7; display: flex; align-items: center; gap: 12px; padding: 8px 12px; border: 1px solid var(--hair-2); border-radius: 12px; background: var(--glass); font-size: 0.9rem; pointer-events: auto; }
+.connection-notice span { flex: 1; min-width: 0; }
+.connection-notice button { min-width: 64px; min-height: 44px; flex: none; }
 
 /* Glass bits */
 .glass-pill, .controls, .dock, .chat-toasts li, .requests, .sheet {
@@ -334,6 +337,8 @@ button.chip:hover { border-color: var(--no); }
 .top-overlay { top: 0; padding: 18px 20px 40px; background: linear-gradient(to bottom, rgba(0, 0, 0, 0.45), transparent); display: flex; align-items: center; gap: 8px; }
 .stage-mark { width: 36px; height: 36px; border-radius: 10px; display: block; }
 .glass-pill { display: inline-flex; align-items: center; gap: 8px; height: 36px; min-height: 0; padding: 0 14px; border-radius: 999px; font-size: 0.82rem; font-weight: 600; color: var(--text); }
+#room-duration { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.top-overlay { flex-wrap: wrap; }
 .code-pill { letter-spacing: 0.1em; cursor: pointer; }
 .code-pill:hover { background: rgba(40, 56, 76, 0.7); }
 
