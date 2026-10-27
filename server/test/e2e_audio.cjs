@@ -162,6 +162,10 @@ async function mediaProgress(page) {
     assert(initialCards.every((box, i) => box.every((v, j) => Math.abs(v - settledCards[i][j]) < 1)),
       'Home card geometry stays stable after startup and font loading');
     console.log(`PASS ${engine}: cold startup sizes TV cards before showing them, without a late font/layout jump`);
+    // Fail at the offending recovery/UI condition instead of waiting for the
+    // workflow's global timeout with no useful location or assertion.
+    host.setDefaultTimeout(20000);
+    viewer.setDefaultTimeout(20000);
     await viewer.goto(BASE);
     await viewer.locator('#go-friends').click();
     const publicId = (await viewer.locator('#my-friend-code').textContent()).replace(/-/g, '');
