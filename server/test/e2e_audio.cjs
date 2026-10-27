@@ -240,14 +240,14 @@ async function mediaProgress(page) {
     console.log('PASS TV sound capture control reaches the native bridge (simulated)');
     async function checkButtonGroups() {
       const groups = await host.evaluate(() => [
-        ['test-sound', 'test-tv-capture'], ['ctl-reshare', 'ctl-stopshare'],
+        ['test-sound', 'test-tv-capture', 'copy-diagnostics'], ['ctl-reshare', 'ctl-stopshare'],
       ].map(ids => ids.map(id => {
         const box = document.getElementById(id).getBoundingClientRect();
         return { id, width: box.width, height: box.height, left: box.left, top: box.top };
       })));
-      for (const [a, b] of groups) {
+      for (const [a, ...others] of groups) {
         assert(a.width > 0 && a.height > 0, `${a.id} is laid out`);
-        assert(Math.abs(a.width - b.width) < 1 && Math.abs(a.height - b.height) < 1,
+        for (const b of others) assert(Math.abs(a.width - b.width) < 1 && Math.abs(a.height - b.height) < 1,
           `Matched control dimensions: ${JSON.stringify([a, b])}`);
       }
       assert(Math.abs(groups[0][0].left - groups[0][1].left) < 1, 'Sound buttons align vertically');
@@ -273,6 +273,10 @@ async function mediaProgress(page) {
         .flatMap(sender => sender.getParameters().encodings || []).map(e => e.maxBitrate));
       assert(videoCaps.includes(networkTest ? 8000000 : 2500000),
         'TV preference applies the Auto budget and preserves manual host quality');
+      const preferences = await host.evaluate(() => window.__audioTestPeers
+        .filter(pc => pc.connectionState === 'connected').flatMap(pc => pc.getSenders())
+        .filter(sender => sender.track?.kind === 'video').map(sender => sender.getParameters().degradationPreference));
+      assert(preferences.includes('balanced'), 'Large display balances detail and motion');
       assert.equal(await viewer.evaluate(() => localStorage.getItem('bx:displayMode')), '"tv"');
       assert(await viewer.locator('#screen-room').isVisible(), 'Changing display preference keeps the room');
       await viewer.screenshot({ path: `/tmp/boxxie-ui-phone-${engine}.png` });
@@ -309,6 +313,15 @@ async function mediaProgress(page) {
     await viewer.waitForFunction(() => document.getElementById('screen-diag').textContent.includes('Mbps received'));
     await viewer.evaluate(() => document.getElementById('viewer-status').click());
     console.log(`PASS ${engine}: viewer network diagnostics report measured receive bitrate`);
+    await host.evaluate(() => {
+      Object.defineProperty(navigator, 'clipboard', {configurable:true,value:{writeText:async()=>{throw new Error('Clipboard unavailable in TV WebView');}}});
+      document.getElementById('copy-diagnostics').click();
+    });
+    await host.locator('#diagnostics-report:not([hidden])').waitFor();
+    const pictureReport = await host.locator('#diagnostics-report').inputValue();
+    assert(pictureReport.includes('Viewer 1') && pictureReport.includes('Codec:'), 'Copy fallback displays a useful report');
+    assert(!pictureReport.includes(code) && !pictureReport.includes(`Audio ${engine}`), 'Report omits room code and viewer name');
+    await host.evaluate(() => { document.getElementById('diagnostics-report').hidden = true; });
 
     const tracksBefore = await viewer.evaluate(() => document.getElementById('film').srcObject.getTracks().map(t => t.id).sort());
     const addsBefore = await host.evaluate(() => window.__nativeCalls.filter(c => c.startsWith('add:')).length);

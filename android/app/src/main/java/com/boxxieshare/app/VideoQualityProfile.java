@@ -5,6 +5,9 @@ final class VideoQualityProfile {
     final boolean automatic;
     final int height, bitrate, fps;
 
+    int startingBitrate() { return Math.min(bitrate, 2_500_000); }
+    boolean balanceDetail(int displayHeight) { return !automatic || displayHeight >= 1080; }
+
     static VideoQualityProfile forReceiver(boolean automatic, int height, int bitrate,
             boolean forcedVP8, String codec, int displayHeight) {
         if (automatic) {

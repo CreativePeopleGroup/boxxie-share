@@ -29,6 +29,7 @@ jobs:
         run: |
           node --import ./test/register.mjs test/harness.mjs
           node test/quality_policy.cjs
+          node test/diagnostics.cjs
       - name: Install browser test runtime
         working-directory: server
         run: |

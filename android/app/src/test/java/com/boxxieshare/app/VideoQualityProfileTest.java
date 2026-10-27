@@ -4,6 +4,15 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class VideoQualityProfileTest {
+    @Test public void startupHintRespectsTheCeilingAndLargeScreensBalanceDetail() {
+        VideoQualityProfile auto = VideoQualityProfile.forReceiver(true, 1080, 8_000_000, false, "H264", 1080);
+        assertEquals(2_500_000, auto.startingBitrate());
+        assertTrue(auto.balanceDetail(1080));
+        assertFalse(auto.balanceDetail(720));
+        VideoQualityProfile low = new VideoQualityProfile(true, 540, 800_000, false);
+        assertEquals(800_000, low.startingBitrate());
+        assertTrue(new VideoQualityProfile(false, 1080, 8_000_000, false).balanceDetail(720));
+    }
     @Test public void directlyNegotiatedVP8GetsAutoBudgetWithoutAFallbackRestart() {
         VideoQualityProfile p = VideoQualityProfile.forCodec(true, 1080, 4_000_000, false, "vp8");
         assertEquals(720, p.height);

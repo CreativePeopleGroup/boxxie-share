@@ -1105,6 +1105,53 @@
   // ----- TV app: how each friend's picture is doing (shown under "Friends join here") -----
   const health = new Map();
   let localAudioHealth = null;
+  $("copy-diagnostics").onclick = async () => {
+    const active = (S.roster || []).filter(v => !v.companionOf).map(v => health.get(v.id) || {});
+    const report = window.BoxxieDiagnostics.report({
+      version: APP ? APP.name : "web",
+      device: NATIVE ? [nativeInfo.manufacturer, nativeInfo.model,
+        `Android ${nativeInfo.androidVersion || nativeInfo.sdk || "unknown"}`,
+        `WebView ${nativeInfo.webViewVersion || "unknown"}`].filter(Boolean).join(" · ") : "Web browser",
+      quality: quality().label, viewers: active,
+    });
+    try {
+      await navigator.clipboard.writeText(report);
+      $("diagnostics-report").hidden = true;
+      toast("Picture diagnostics copied");
+    } catch {
+      // TV WebViews may not expose the clipboard. Keep the same report readable.
+      const field = $("diagnostics-report");
+      field.value = report;
+      field.hidden = false;
+      field.focus();
+      field.select();
+      toast("Report shown below. You can copy it or take a photo.");
+    }
+  };
+  let browserStatsPending = false;
+  setInterval(async () => {
+    if (S.role !== "host" || S.native || browserStatsPending) return;
+    browserStatsPending = true;
+    try {
+      for (const [id, p] of S.peers) {
+        if (S.companionOf.has(id)) continue;
+        const sender = [...p.filmSenders.values()].find(s => s.track?.kind === "video");
+        if (!sender) continue;
+        const report = await sender.getStats();
+        if (S.peers.get(id) !== p || S.role !== "host") continue;
+        const video = [...report.values()].find(r => r.type === "outbound-rtp" && (r.kind === "video" || r.mediaType === "video"));
+        if (!video) continue;
+        const codec = report.get(video.codecId);
+        onViewerHealth({ type: "viewer-stats", peer: id, ice: p.pc.iceConnectionState,
+          frames: video.framesEncoded || 0, bytes: video.bytesSent || 0,
+          width: video.frameWidth, height: video.frameHeight, fps: video.framesPerSecond,
+          codec: codec?.mimeType?.replace("video/", ""),
+          profile: codec?.sdpFmtpLine?.match(/(?:^|[;\s])profile-level-id=([0-9a-f]{6})(?:;|\s|$)/i)?.[1],
+          encoder: video.encoderImplementation, limit: video.qualityLimitationReason,
+          targetBitrate: video.targetBitrate, route: window.BoxxieDiagnostics.route(report) });
+      }
+    } catch {} finally { browserStatsPending = false; }
+  }, 3000);
   function onViewerHealth(ev) {
     if (ev.type === "audio-health") {
       localAudioHealth = ev;
@@ -1115,6 +1162,9 @@
     const h = health.get(ev.peer) || { frames: 0, last: 0 };
     if (ev.ice) h.ice = ev.ice;
     if (ev.type === "viewer-stats") {
+      const now = performance.now();
+      if (h.sampleAt && ev.bytes >= h.bytes) h.mbps = (ev.bytes - h.bytes) * 8 / (now - h.sampleAt) / 1000;
+      h.sampleAt = now;
       h.growing = ev.frames > h.frames;
       h.frames = ev.frames;
       h.bytes = ev.bytes;
@@ -1128,6 +1178,11 @@
       }
       h.fps = ev.fps;
       h.height = ev.height;
+      h.width = ev.width;
+      h.profile = ev.profile;
+      h.route = ev.route;
+      h.targetBitrate = ev.targetBitrate;
+      h.startupBitrateAccepted = ev.startupBitrateAccepted;
       h.audioState = ev.audioState;
       h.audioFrames = ev.audioFrames;
       h.audioFormat = ev.audioFormat;
@@ -1143,7 +1198,7 @@
   function renderHealth() {
     const list = $("viewer-health");
     list.replaceChildren();
-    if (S.role !== "host" || !S.native) {
+    if (S.role !== "host") {
       list.hidden = true;
       $("test-sound").hidden = true;
       $("test-tv-capture").hidden = true;
@@ -1164,7 +1219,7 @@
         text = "can't connect (network)";
         li.className = "bad";
       } else if ((ice === "connected" || ice === "completed") && h.frames > 0) {
-        const busy = h.limit === "cpu" ? " (TV busy)" : h.limit === "bandwidth" ? " (slow internet)" : "";
+        const busy = h.limit === "cpu" ? " (encoder busy)" : h.limit === "bandwidth" ? " (network limited)" : "";
         const why = {
           "no-permission": " · no sound: Boxxie isn't allowed to record sound",
           error: " · no sound: recording didn't start",
@@ -1174,6 +1229,8 @@
         }[h.audioState];
         const snd = h.sound === undefined ? "" : !h.sound ? why || " · no sound playing" : h.soundSending === false ? " · sound not sending" : " and sound";
         text = `getting the picture${snd}${h.height ? ` · ${qualityName(h.height)}` : ""} · ${h.codec || "video"}${h.fps ? ` · ${h.fps} fps${busy}` : ""}`;
+        if (h.mbps !== undefined) text += ` · ${h.mbps.toFixed(1)} Mbps`;
+        if (h.route && h.route !== "unknown") text += ` · ${h.route}`;
         li.className = "ok";
       } else if (ice === "connected" || ice === "completed") {
         text = h.vp8 ? "connected, trying another video format…" : "connected, starting the picture…";
@@ -1196,8 +1253,8 @@
     list.hidden = !list.children.length;
     // Sound check tools (only while someone's watching)
     const anyone = !list.hidden;
-    $("test-sound").hidden = !(anyone && typeof NATIVE.testSound === "function");
-    $("test-tv-capture").hidden = !(anyone && S.nativeAudio && typeof NATIVE.testTvSoundCapture === "function");
+    $("test-sound").hidden = !(anyone && NATIVE && typeof NATIVE.testSound === "function");
+    $("test-tv-capture").hidden = !(anyone && NATIVE && S.nativeAudio && typeof NATIVE.testTvSoundCapture === "function");
     const first = [...health.values()].find((x) => x.audioFrames !== undefined);
     const diag = first || localAudioHealth;
     $("sound-detail").hidden = !diag;
@@ -2491,6 +2548,7 @@
         if (!sender.track || sender.track.kind !== "video") continue;
         try {
           const params = sender.getParameters();
+          params.degradationPreference = window.BoxxieQuality.preference(q, p.displayHeight);
           const height = sender.track.getSettings?.().height || filmVideo.videoHeight || q.height;
           for (const encoding of params.encodings || []) {
             encoding.maxBitrate = q.maxBitrate;
@@ -2524,7 +2582,7 @@
         preferCodecs(tx);
         try {
           const params = tx.sender.getParameters();
-          params.degradationPreference = Q.automatic ? "maintain-framerate" : "balanced";
+          params.degradationPreference = window.BoxxieQuality.preference(Q, p.displayHeight);
           tx.sender.setParameters(params).catch(() => {});
         } catch {}
       }
@@ -3094,6 +3152,9 @@
 
   function cleanup() {
     S.closing = true;
+    health.clear();
+    localAudioHealth = null;
+    $("diagnostics-report").hidden = true;
     clearTimeout(hostAwayTimer);
     screenRestartAt.clear();
     connectionEpoch++;
