@@ -37,7 +37,10 @@ module.exports = async function testNetworkAdaptation(viewer) {
     const existing = JSON.parse(tc(['-j', 'qdisc', 'show', 'dev', 'lo']));
     assert(!existing.some(q => q.root && q.kind !== 'noqueue'), 'Do not replace an existing loopback shaper');
     tc(['qdisc', 'add', 'dev', 'lo', 'root', 'handle', '1:', 'prio', 'bands', '3']); installed = true;
-    tc(['qdisc', 'add', 'dev', 'lo', 'parent', '1:3', 'handle', '30:', 'netem', 'limit', '60', 'rate', '12mbit']);
+    // The healthy reference must absorb keyframe/pacing bursts. A 60-packet
+    // queue can introduce unintended loss even when average video is below 12M.
+    // Keep the deliberately small queue only for the impaired phase.
+    tc(['qdisc', 'add', 'dev', 'lo', 'parent', '1:3', 'handle', '30:', 'netem', 'limit', '1000', 'rate', '12mbit']);
     tc(['filter', 'add', 'dev', 'lo', 'protocol', 'ip', 'parent', '1:', 'prio', '1', 'u32', 'match', 'ip', 'protocol', '17', '0xff', 'flowid', '1:3']);
     tc(['filter', 'add', 'dev', 'lo', 'protocol', 'ipv6', 'parent', '1:', 'prio', '2', 'u32', 'match', 'ip6', 'protocol', '17', '0xff', 'flowid', '1:3']);
 
@@ -58,6 +61,11 @@ module.exports = async function testNetworkAdaptation(viewer) {
     }
 
     const healthy = await measure('healthy', 15);
+    const healthyQueue = JSON.parse(tc(['-j', '-s', 'qdisc', 'show', 'dev', 'lo'])).find(q => q.kind === 'netem');
+    report.healthyShaper = { bytes: healthyQueue?.bytes, drops: healthyQueue?.drops };
+    console.log('HEALTHY_SHAPER', JSON.stringify(report.healthyShaper));
+    assert(healthyQueue && healthyQueue.bytes > 0 && healthyQueue.drops === 0,
+      'Healthy reference must carry media without unintended packet drops');
     assert(healthy.mbps > 0.4 && healthy.fps >= 20, 'The source must have meaningful bitrate and smooth baseline motion');
     const limitedKbit = Math.max(150, Math.min(900, Math.floor(healthy.mbps * 1000 * 0.35)));
     report.limitedKbit = limitedKbit;
@@ -69,7 +77,7 @@ module.exports = async function testNetworkAdaptation(viewer) {
     const qdisc = JSON.parse(tc(['-j', '-s', 'qdisc', 'show', 'dev', 'lo'])).find(q => q.kind === 'netem');
     assert(qdisc && qdisc.bytes > 0, 'The impairment must affect actual packets');
     report.shaper = { bytes: qdisc.bytes, drops: qdisc.drops };
-    tc(['qdisc', 'change', 'dev', 'lo', 'parent', '1:3', 'handle', '30:', 'netem', 'limit', '60',
+    tc(['qdisc', 'change', 'dev', 'lo', 'parent', '1:3', 'handle', '30:', 'netem', 'limit', '1000',
       'rate', '12mbit', 'delay', '0ms', 'loss', '0%']);
     const recovered = await measure('recovered', 40);
     assert(recovered.mbps > limited.mbps * 1.3 && recovered.mbps >= healthy.mbps * 0.5 && recovered.fps >= 20,
