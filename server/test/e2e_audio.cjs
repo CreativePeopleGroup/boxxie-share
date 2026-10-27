@@ -467,9 +467,13 @@ async function mediaProgress(page) {
     const duringAfter = await mediaProgress(viewer);
     assert(duringAfter.frames > duringBefore.frames && duringAfter.energy > duringBefore.energy,
       'Existing picture and sound continue during host ticket failure');
-    await host.unroute('**/api/ticket');
-    await viewer.waitForFunction(() => document.getElementById('banner').textContent.includes("Waiting for the host's video"));
+    await viewer.waitForFunction(() => !document.getElementById('connection-notice').hidden);
     assert(await viewer.locator('#screen-room').isVisible(), 'Host interruption keeps the viewer in the room');
+    await viewer.locator('#connection-notice-hide').click();
+    assert(await viewer.locator('#connection-notice').isHidden(), 'Connection notice can be dismissed without leaving or stopping video');
+    await host.unroute('**/api/ticket');
+    await host.waitForFunction(() => document.getElementById('banner').hidden &&
+      window.__testSockets.some(w => w.url.includes('/api/rooms/') && w.readyState === 1));
     await viewer.waitForFunction(() => document.getElementById('banner').hidden);
     await receiving(viewer);
     assert.equal(await host.locator('#request-list .allow').count(), 0, 'Host recovery needs no new approval');

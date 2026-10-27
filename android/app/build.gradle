@@ -20,6 +20,7 @@ android {
         // Where the update button looks: the latest GitHub release (set by the build workflow)
         buildConfigField 'String', 'UPDATE_URL', '"' + (project.findProperty('updateUrl') ?: '') + '"'
         buildConfigField 'String', 'APP_URL', "\"${appUrl}\""
+        buildConfigField 'String', 'SERVER_URL', '"' + (project.findProperty('serverUrl') ?: 'https://boxxie-share-server.ricky-kundi.workers.dev') + '"'
         // Fire TV, Android TV boxes and phones are ARM. Leaving out x86 keeps the app small.
         ndk { abiFilters 'armeabi-v7a', 'arm64-v8a' }
     }
@@ -96,6 +97,9 @@ android {
 
 dependencies {
     testImplementation 'junit:junit:4.13.2'
+    implementation 'com.squareup.okhttp3:okhttp:5.5.1'
+    testImplementation 'com.squareup.okhttp3:mockwebserver:5.5.1'
+    testImplementation 'org.json:json:20250517'
     // Google's open-source WebRTC engine (prebuilt by the webrtc-sdk project): the video engine
     // that sends the whole screen to friends while the app is in the background.
     implementation 'io.github.webrtc-sdk:android:144.7559.15'

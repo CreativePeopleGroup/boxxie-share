@@ -22,6 +22,7 @@
   <script src="qr.js" defer></script>
   <script src="quality-policy.js" defer></script>
   <script src="diagnostics.js" defer></script>
+  <script src="native-room.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -404,12 +405,17 @@
         </div></div>
         <button class="sound-on" id="sound-on" hidden>Turn sound on</button>
         <div class="banner" id="banner" role="status" hidden></div>
+        <div class="connection-notice" id="connection-notice" hidden>
+          <span id="connection-notice-text" role="status"></span>
+          <button id="connection-notice-hide" type="button" aria-label="Hide connection notice">Hide</button>
+        </div>
         <div class="screen-diag" id="screen-diag" role="status" hidden></div>
 
         <div class="overlay top-overlay">
           <img class="stage-mark" src="icons/icon-192.png" alt="Boxxie Share" width="192" height="192">
           <span class="glass-pill" id="live-pill"><span class="live-dot" aria-hidden="true"></span><span id="live-text">Live</span></span>
           <button class="glass-pill code-pill" id="code-pill" hidden aria-label="Share the room code"></button>
+          <span class="glass-pill" id="room-duration" hidden aria-label="Room open duration"></span>
         </div>
 
         <!-- Video call faces sit here, small, while the drawer is closed -->

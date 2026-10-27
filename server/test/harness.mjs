@@ -222,6 +222,8 @@ try {
 const host = await connect(`/api/rooms/${room.code}/ws?role=host&token=${room.hostToken}`);
 const welcome = await host.next(type("welcome"));
 ok(Array.isArray(welcome.iceServers), "host welcomed with ICE servers");
+const roomClock = await host.next(type("roster"));
+ok(Number.isFinite(roomClock.createdAt) && roomClock.serverNow >= roomClock.createdAt, "host receives server room age");
 
 const v1 = await connect(`/api/rooms/${room.code.toLowerCase().slice(0, 4)}-${room.code.slice(4)}/ws?role=viewer&name=Sarah`);
 const waiting = await v1.next(type("waiting"));
@@ -235,6 +237,8 @@ v1.sendJ({ type: "signal", to: "host", data: { x: 1 } });
 host.sendJ({ type: "approve", id: req.id });
 const approved = await v1.next(type("approved"));
 ok(Array.isArray(approved.iceServers), "viewer approved");
+const viewerClock = await v1.next(type("peers"));
+ok(viewerClock.createdAt === roomClock.createdAt, "viewer sees the host room start, not their join time");
 await host.next(type("viewer-ready"));
 
 let leaked = false;
@@ -294,6 +298,8 @@ host.close();
 await v1.next(type("host-away"));
 const host2 = await connect(`/api/rooms/${room.code}/ws?role=host&token=${room.hostToken}`);
 await host2.next(type("welcome"));
+const resumedClock = await host2.next(type("roster"));
+ok(resumedClock.createdAt === roomClock.createdAt && resumedClock.serverNow >= roomClock.serverNow, "reconnecting preserves room start time");
 const back = await v1.next(type("host-back"));
 const ready = await host2.next(type("viewer-ready"));
 ok(!!back && ready.id === req.id, "host can reconnect and viewers resume");
