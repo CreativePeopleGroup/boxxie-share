@@ -81,6 +81,7 @@
     },
     signal: async (id, json) => {
       const pc = pcs.get(id); if (!pc) return;
+      try {
       const d = JSON.parse(json);
       if (d.session && d.session !== session) return;
       if (d.displayHeight !== undefined) {
@@ -101,6 +102,12 @@
       }
       if (d.sdp) await pc.setRemoteDescription(d.sdp);
       else if (d.candidate) await pc.addIceCandidate(d.candidate).catch(() => {});
+      } catch (error) {
+        // A host reconnect may replace this simulated engine's peer while a
+        // live quality update is awaiting setParameters. Ignore only stale work.
+        if (pcs.get(id) !== pc || pc.signalingState === "closed") return;
+        throw error;
+      }
     },
     removeViewer: (id) => { window.__nativeCalls.push("remove:" + id); const pc = pcs.get(id); if (pc) pc.close(); pcs.delete(id); },
     stopScreenShare: () => {
