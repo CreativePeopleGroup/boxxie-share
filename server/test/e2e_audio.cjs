@@ -240,14 +240,14 @@ async function mediaProgress(page) {
     console.log('PASS TV sound capture control reaches the native bridge (simulated)');
     async function checkButtonGroups() {
       const groups = await host.evaluate(() => [
-        ['test-sound', 'test-tv-capture'], ['ctl-reshare', 'ctl-stopshare'],
+        ['test-sound', 'test-tv-capture', 'copy-diagnostics'], ['ctl-reshare', 'ctl-stopshare'],
       ].map(ids => ids.map(id => {
         const box = document.getElementById(id).getBoundingClientRect();
         return { id, width: box.width, height: box.height, left: box.left, top: box.top };
       })));
-      for (const [a, b] of groups) {
+      for (const [a, ...others] of groups) {
         assert(a.width > 0 && a.height > 0, `${a.id} is laid out`);
-        assert(Math.abs(a.width - b.width) < 1 && Math.abs(a.height - b.height) < 1,
+        for (const b of others) assert(Math.abs(a.width - b.width) < 1 && Math.abs(a.height - b.height) < 1,
           `Matched control dimensions: ${JSON.stringify([a, b])}`);
       }
       assert(Math.abs(groups[0][0].left - groups[0][1].left) < 1, 'Sound buttons align vertically');

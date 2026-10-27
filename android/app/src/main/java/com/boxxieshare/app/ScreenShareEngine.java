@@ -600,7 +600,11 @@ public final class ScreenShareEngine {
             VideoQualityProfile initial = VideoQualityProfile.forReceiver(automaticQuality,
                     maxHeight, maxBitrate, vp8, "", 0);
             // A one-time starting estimate, not a forced minimum or a rate loop.
-            v.startupBitrateAccepted = pc.setBitrate(null, initial.startingBitrate(), null);
+            try {
+                v.startupBitrateAccepted = pc.setBitrate(null, initial.startingBitrate(), null);
+            } catch (RuntimeException error) {
+                Log.w(TAG, "starting bitrate hint rejected; retaining engine defaults", error);
+            }
             pc.createOffer(new SdpAdapter() {
                 @Override
                 public void onCreateSuccess(SessionDescription sdp) {
