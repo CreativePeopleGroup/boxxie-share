@@ -65,6 +65,7 @@ jobs:
             sleep 1
           done
           node test/e2e_audio.cjs
+          if [ "${{ matrix.browser }}" = "chromium" ]; then node test/e2e_native_room.cjs; fi
       - name: Save TV and phone layout previews
         if: always()
         uses: actions/upload-artifact@v4

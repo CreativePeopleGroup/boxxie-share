@@ -180,7 +180,7 @@ public final class ScreenShareEngine {
                 String id = m.getString("id");
                 Viewer v = viewers.get(id);
                 // Keep healthy media tracks during signalling recovery.
-                if (v == null || !(v.ice.equals("connected") || v.ice.equals("completed"))) connectViewer(id, false);
+                if (v == null || v.ice.equals("failed") || v.ice.equals("disconnected") || v.ice.equals("closed")) connectViewer(id, false);
             } else if (type.equals("roster")) {
                 // Reconcile after page recreation: a missed UI event must never
                 // leave a removed viewer receiving the native capture.

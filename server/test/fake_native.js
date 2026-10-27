@@ -3,7 +3,14 @@
 // through window.boxxieNativeEvent.
 (() => {
   try { delete MediaDevices.prototype.getDisplayMedia; } catch (e) {}
-  const emit = (ev) => setTimeout(() => window.boxxieNativeEvent && window.boxxieNativeEvent(JSON.stringify(ev)), 0);
+  let roomSocket = null, roomConfig = null, roomEpoch = 0, roomHeartbeat = null;
+  const emit = (ev) => {
+    if (ev.type === 'signal' && roomConfig) {
+      if (roomSocket?.readyState === 1) roomSocket.send(JSON.stringify({type:'signal',to:ev.peer,data:{...ev.data,ch:'screen'}}));
+      return;
+    }
+    setTimeout(() => window.boxxieNativeEvent && window.boxxieNativeEvent(JSON.stringify(ev)), 0);
+  };
   let ice = [], stream = null, session = null, timer = null, playbackPaused = false;
   const pcs = new Map();
   let generation = 0;
@@ -39,7 +46,7 @@
   }
   window.__nativeCalls = [];
   window.BoxxieNative = {
-    screenShareInfo: () => JSON.stringify({ available: true, audio: true, sdk: 34, automaticQuality: !window.__legacyNative,
+    screenShareInfo: () => JSON.stringify({ available: true, audio: true, sdk: 34, automaticQuality: !window.__legacyNative, roomConnection: !!window.__nativeRoomTest,
       manufacturer: "Test", model: "Simulated TV", androidVersion: "14", webViewVersion: "test" }),
     startScreenShare: (cfg) => {
       window.__nativeCalls.push("start");
@@ -141,5 +148,51 @@
       window.__nativeCalls.push("install-update");
       [10, 50, 100].forEach((pct, i) => setTimeout(() => window.boxxieNativeEvent(JSON.stringify({ type: "update-progress", pct })), 100 * (i + 1)));
     },
+  };
+  // Opt-in native-room stand-in for wiring tests. This is not an Android
+  // background-lifecycle simulation; the JVM suite tests the real transport.
+  async function connectRoomTransport() {
+    const epoch = ++roomEpoch, config = roomConfig;
+    if (!config) return;
+    const response = await fetch(config.server + '/api/ticket', {method:'POST',headers:{Authorization:'Bearer '+config.sessionToken}});
+    const ticket = (await response.json()).ticket;
+    if (epoch !== roomEpoch) return;
+    const ws = new WebSocket(config.server.replace(/^http/,'ws') + '/api/rooms/' + config.code + '/ws?role=host&token=' + config.hostToken + '&ticket=' + ticket);
+    roomSocket = ws;
+    window.__nativeRoomWire = ws;
+    ws.onopen = () => {
+      emit({type:'room-state',connectionId:config.id,state:'open'});
+      clearInterval(roomHeartbeat);
+      roomHeartbeat = setInterval(() => ws.readyState === 1 && ws.send('{"type":"ping"}'), 200);
+    };
+    ws.onmessage = e => {
+      if (epoch !== roomEpoch) return;
+      const m = JSON.parse(e.data);
+      if (m.type === 'welcome') window.BoxxieNative.setIceServers(JSON.stringify(m.iceServers || []));
+      if (m.type === 'viewer-ready' && !m.companionOf && !pcs.has(m.id)) window.BoxxieNative.addViewer(m.id);
+      if (m.type === 'viewer-left') window.BoxxieNative.removeViewer(m.id);
+      if (m.type === 'signal' && m.data?.ch === 'screen') {
+        if (m.data.restart) window.BoxxieNative.addViewer(m.from);
+        else window.BoxxieNative.signal(m.from, JSON.stringify(m.data));
+      }
+      emit({type:'room-message',connectionId:config.id,message:m});
+    };
+    ws.onclose = e => {
+      clearInterval(roomHeartbeat);
+      if (epoch !== roomEpoch || !roomConfig) return;
+      if ([4000,4003,4004].includes(e.code)) emit({type:'room-state',connectionId:config.id,state:'closed',code:e.code,reason:e.reason});
+      else { emit({type:'room-state',connectionId:config.id,state:'retrying'}); setTimeout(connectRoomTransport, window.__nativeRoomReconnectDelay || 500); }
+    };
+  }
+  window.BoxxieNative.connectRoom = json => {
+    window.__nativeRoomStarts = (window.__nativeRoomStarts || 0) + 1;
+    roomConfig = JSON.parse(json);
+    connectRoomTransport();
+    return true;
+  };
+  window.BoxxieNative.sendRoom = (id,json) => { if (roomConfig?.id === id && roomSocket?.readyState === 1) roomSocket.send(json); };
+  window.BoxxieNative.disconnectRoom = id => {
+    if (roomConfig?.id !== id) return;
+    roomConfig = null; ++roomEpoch; clearInterval(roomHeartbeat); roomSocket?.close(); roomSocket = null;
   };
 })();
