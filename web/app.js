@@ -52,6 +52,16 @@
   if (isTV) {
     fitTV();
     let fittedWidth = innerWidth, fittedHeight = innerHeight;
+    document.addEventListener("focusin", () => {
+      if (!isTyping()) return;
+      // Capture the full viewport before the keyboard opens, even when a prior
+      // real resize event has not yet been delivered. Never cache keyboard height.
+      if (innerWidth !== fittedWidth || innerHeight > fittedHeight) {
+        fittedWidth = innerWidth;
+        fittedHeight = innerHeight;
+        fitTV();
+      }
+    });
     addEventListener("resize", () => {
       // A software keyboard is not a smaller TV. Android pans focused fields;
       // retain sizing too if a vendor WebView still reports a keyboard resize.

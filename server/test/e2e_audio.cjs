@@ -173,6 +173,7 @@ async function mediaProgress(page) {
     await host.locator('#go-friends').click();
     for (const size of [{width:1280,height:720},{width:960,height:540}]) {
       await host.setViewportSize(size);
+      await host.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
       const fits = await host.evaluate(() => document.documentElement.scrollHeight <= innerHeight + 1 && document.documentElement.scrollWidth <= innerWidth + 1);
       assert(fits,'Friends stays on one TV page');
     }
