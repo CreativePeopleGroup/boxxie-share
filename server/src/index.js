@@ -853,10 +853,17 @@ export class Room extends DurableObject {
   }
 
   async webSocketClose(ws, code, reason, wasClean) {
+    // Our compatibility date predates Cloudflare's automatic close replies.
+    // Complete the handshake even if the room has already closed. Reserved
+    // synthetic codes (notably 1006) cannot be sent in a close frame.
+    const replyCode = Number.isInteger(code) && code >= 1000 && code <= 4999 && ![1004, 1005, 1006, 1015].includes(code) ? code : 1000;
+    try { ws.close(replyCode, "connection closed"); } catch {}
     await this._left(ws, { cause: "close", closeCode: Number.isInteger(code) ? code : null, clean: !!wasClean });
   }
   async webSocketError(ws) {
     await this._left(ws, { cause: "error" });
+    // Do not leave a retired socket replying to pings while no host is registered.
+    try { ws.close(1011, "connection error"); } catch {}
   }
 
   async _left(ws, details) {

@@ -354,6 +354,12 @@ ok(blockedAt !== null && blockedAt <= 10, `guessing codes is blocked after a few
   try { await connect(hostPath, shared, "nobody"); ok(false, "host recovery requires a valid sign-in ticket"); }
   catch (e) { ok(e.message === "signed_out", "host recovery requires a valid sign-in ticket"); }
 
+  const errored = object._host().ws;
+  await object.webSocketError(errored);
+  ok(errored._closed, "errored host socket is closed so the client can reconnect");
+  h = await connect(hostPath, shared);
+  await h.next(type("welcome"));
+
   h.sendJ({ type: "ping" });
   await h.next(type("pong"));
   const socket = object._host().ws;

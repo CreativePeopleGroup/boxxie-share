@@ -7,6 +7,10 @@ room codes, account IDs, names, IP addresses, SDP, ICE candidates or raw socket
 close text. Cloudflare's own error/platform metadata is separate from these
 custom events.
 
+The server completes the WebSocket close handshake explicitly (required with
+its pre-April-2026 compatibility date). An errored socket is retired and closed
+so it cannot keep answering pings as if the room still had a healthy host.
+
 In Cloudflare, select **Workers & Pages → boxxie-share-server → Observability**.
 Find events around the reported test time, then filter on the anonymous `roomRef`
 to follow that room. New rooms receive a random persistent reference; rooms
