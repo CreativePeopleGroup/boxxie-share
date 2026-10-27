@@ -12,6 +12,15 @@ const args = ['--autoplay-policy=no-user-gesture-required', '--disable-features=
 const chromeOptions = { args, ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : {}) };
 const bridge = readFileSync(`${__dirname}/fake_native.js`, 'utf8');
 
+async function bounded(operation, label, ms = 10000) {
+  let timer;
+  try {
+    return await Promise.race([operation, new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${engine}: ${label} timed out after ${ms}ms`)), ms);
+    })]);
+  } finally { clearTimeout(timer); }
+}
+
 async function signedInPage(browser, name, options = {}) {
   const ip = `10.50.${Math.floor(Math.random() * 250)}.${1 + Math.floor(Math.random() * 250)}`;
   const response = await fetch(`${BASE}auth/code/create`, {
@@ -58,7 +67,7 @@ async function receiving(page) {
   const deadline = Date.now() + 30000;
   let received = false;
   while (Date.now() < deadline) {
-    received = await page.evaluate(async () => {
+    received = await bounded(page.evaluate(async () => {
     const video = document.getElementById('film');
     if (!video.srcObject || !video.videoWidth || video.currentTime < 0.3 ||
         !video.srcObject.getAudioTracks().some(t => t.readyState === 'live')) return false;
@@ -71,11 +80,11 @@ async function receiving(page) {
       }
     }
     return false;
-    });
+    }), 'read received video/audio statistics');
     if (received) break;
     await new Promise(resolve => setTimeout(resolve, 250));
   }
-  if (!received) console.error(await page.evaluate(async () => ({
+  if (!received) console.error(await bounded(page.evaluate(async () => ({
     screens: [...document.querySelectorAll('.screen')].filter(s => !s.hidden).map(s => s.id),
     waiting: document.getElementById('waiting-text').textContent,
     joinError: document.getElementById('join-error').textContent,
@@ -88,13 +97,13 @@ async function receiving(page) {
       state: p.connectionState, ice: p.iceConnectionState, signal: p.signalingState,
       stats: [...(await p.getStats()).values()].filter(r => ['inbound-rtp', 'candidate-pair'].includes(r.type)),
     }))),
-  })));
+  })), 'read failed receive diagnostics'));
   assert(received, `${engine}: receive rendered video and audio energy within 30 seconds`);
   console.log(`PASS ${engine}: rendered video and received nonzero audio energy over WebRTC`);
 }
 
 async function mediaProgress(page) {
-  return page.evaluate(async () => {
+  return bounded(page.evaluate(async () => {
     let frames = 0, energy = 0;
     for (const peer of window.__audioTestPeers) {
       if (peer.connectionState === 'closed') continue;
@@ -105,7 +114,7 @@ async function mediaProgress(page) {
       }
     }
     return { frames, energy, time: document.getElementById('film').currentTime };
-  });
+  }), 'read media progress');
 }
 
 (async () => {
@@ -478,7 +487,7 @@ async function mediaProgress(page) {
     await receiving(viewer);
     assert.equal(await host.locator('#viewer-health li').count(),1,'Host stale-socket recovery preserves the viewer');
     console.log(`PASS ${engine}: host ticket failure and stale signalling recover automatically`);
-    await host.evaluate(() => {
+    await bounded(host.evaluate(() => {
       const NativeSocket = window.WebSocket;
       window.__restoreSocket = () => { window.WebSocket = NativeSocket; };
       window.__testConstructFailures = 0;
@@ -492,7 +501,7 @@ async function mediaProgress(page) {
         return Reflect.construct(Target,args);
       }});
       window.__testSockets.filter(w => w.url.includes('/api/rooms/') && w.readyState === 1).forEach(w => w.close());
-    });
+    }), 'inject host socket constructor failure');
     // Observe the injected failure itself, not a banner that may already have
     // disappeared before automation polls it. Bound these recovery checks.
     await host.waitForFunction(() => window.__testConstructFailures === 1, null, {timeout:20000});
@@ -575,8 +584,13 @@ async function mediaProgress(page) {
     await host.evaluate(() => window.dispatchEvent(new Event('online')));
     assert(await host.locator('#screen-waiting').isVisible(),'A closed room does not pretend to be live');
     assert.deepEqual(errors, [], 'No uncaught browser errors');
+  } catch (error) {
+    // Report before closing browsers: a stuck browser shutdown must not hide
+    // the actual failing assertion behind the workflow's five-minute limit.
+    console.error(error);
+    throw error;
   } finally {
-    if (viewerBrowser) await viewerBrowser.close();
-    if (hostBrowser) await hostBrowser.close();
+    if (viewerBrowser) await bounded(viewerBrowser.close(), 'close viewer browser');
+    if (hostBrowser) await bounded(hostBrowser.close(), 'close host browser');
   }
-})().catch(error => { console.error(error); process.exitCode = 1; });
+})().catch(error => { console.error(error); process.exit(1); });
