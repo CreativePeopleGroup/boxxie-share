@@ -1,6 +1,9 @@
 const assert = require('node:assert/strict');
 const policy = require('../../web/quality-policy.js');
 const auto = { automatic: true, height: 1080, maxBitrate: 8_000_000 };
+assert.equal(policy.preference(auto,1080),'balanced');
+assert.equal(policy.preference(auto,720),'maintain-framerate');
+assert.equal(policy.preference({automatic:false},720),'balanced');
 assert.equal(policy.displayHeight({width:390,height:844}),720);
 assert.equal(policy.displayHeight({width:844,height:390}),720);
 assert.equal(policy.displayHeight({width:820,height:1180}),1080);

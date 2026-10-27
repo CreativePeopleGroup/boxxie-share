@@ -105,6 +105,7 @@ public final class ScreenShareEngine {
         RtpSender videoSender;
         int displayHeight;
         String codec = "";
+        boolean startupBitrateAccepted;
         boolean vp8BudgetApplied;
         boolean remoteSet;
         boolean vp8;            // switched to VP8 because the H.264 encoder produced no picture
@@ -596,6 +597,10 @@ public final class ScreenShareEngine {
             v.videoSender = vt.getSender();
             v.vp8BudgetApplied = vp8;
             limitBitrate(v, vp8, "");
+            VideoQualityProfile initial = VideoQualityProfile.forReceiver(automaticQuality,
+                    maxHeight, maxBitrate, vp8, "", 0);
+            // A one-time starting estimate, not a forced minimum or a rate loop.
+            v.startupBitrateAccepted = pc.setBitrate(null, initial.startingBitrate(), null);
             pc.createOffer(new SdpAdapter() {
                 @Override
                 public void onCreateSuccess(SessionDescription sdp) {
@@ -648,6 +653,8 @@ public final class ScreenShareEngine {
         double fps = 0;
         int width = 0, height = 0;
         String encoder = "", codec = "", limit = "";
+        String profile = "", route = "unknown";
+        double targetBitrate = 0;
         Map<String, RTCStats> all = report.getStatsMap();
         long audioBytes = 0;
         for (RTCStats st : all.values()) {
@@ -664,6 +671,7 @@ public final class ScreenShareEngine {
             if (f instanceof Number) frames += ((Number) f).longValue();
             if (b instanceof Number) bytes += ((Number) b).longValue();
             Object fr = m.get("framesPerSecond");
+            if (m.get("targetBitrate") instanceof Number) targetBitrate = ((Number) m.get("targetBitrate")).doubleValue();
             if (fr instanceof Number) fps = ((Number) fr).doubleValue();
             if (m.get("frameWidth") instanceof Number) width = ((Number) m.get("frameWidth")).intValue();
             if (m.get("frameHeight") instanceof Number) height = ((Number) m.get("frameHeight")).intValue();
@@ -675,7 +683,25 @@ public final class ScreenShareEngine {
             if (cid != null && all.get(String.valueOf(cid)) != null) {
                 Object mime = all.get(String.valueOf(cid)).getMembers().get("mimeType");
                 if (mime != null) codec = String.valueOf(mime).replace("video/", "");
+                Object fmtp = all.get(String.valueOf(cid)).getMembers().get("sdpFmtpLine");
+                if (fmtp != null) {
+                    java.util.regex.Matcher match = java.util.regex.Pattern.compile("(?:^|[;\\s])profile-level-id=([0-9a-fA-F]{6})(?:;|\\s|$)").matcher(String.valueOf(fmtp));
+                    if (match.find()) profile = match.group(1);
+                }
             }
+        }
+        for (RTCStats st : all.values()) {
+            if (!"transport".equals(st.getType())) continue;
+            Object pairId = st.getMembers().get("selectedCandidatePairId");
+            RTCStats pair = pairId == null ? null : all.get(String.valueOf(pairId));
+            if (pair == null) continue;
+            RTCStats local = all.get(String.valueOf(pair.getMembers().get("localCandidateId")));
+            RTCStats remote = all.get(String.valueOf(pair.getMembers().get("remoteCandidateId")));
+            if (local == null || remote == null) continue;
+            boolean relay = "relay".equals(local.getMembers().get("candidateType")) || "relay".equals(remote.getMembers().get("candidateType"));
+            Object protocol = local.getMembers().get("relayProtocol");
+            if (protocol == null) protocol = local.getMembers().get("protocol");
+            route = (relay ? "relay" : "direct") + (protocol == null ? "" : " " + String.valueOf(protocol).toUpperCase(java.util.Locale.ROOT));
         }
         if (automaticQuality && !v.vp8BudgetApplied && "VP8".equalsIgnoreCase(codec)) {
             // Some viewers negotiate VP8 directly, without our H.264 fallback.
@@ -692,6 +718,8 @@ public final class ScreenShareEngine {
                     .put("sound", System.nanoTime() - soundSeenNs < 5_000_000_000L)
                     .put("fps", Math.round(fps)).put("limit", limit).put("audioBytes", audioBytes)
                     .put("width", width).put("height", height).put("automaticQuality", automaticQuality)
+                    .put("profile", profile).put("route", route).put("targetBitrate", targetBitrate)
+                    .put("startupBitrateAccepted", v.startupBitrateAccepted)
                     .put("audioState", audioState).put("audioFrames", callbacks).put("audioFormat", lastFormat)
                     .put("capturedPcmBytes", capturedPcmBytes).put("capturedPeak", capturedPeak)
                     .put("outgoingPeak", outgoingPeak).put("captureError", captureError));
@@ -711,9 +739,9 @@ public final class ScreenShareEngine {
             RtpParameters p = sender.getParameters();
             VideoQualityProfile profile = VideoQualityProfile.forReceiver(automaticQuality,
                     maxHeight, maxBitrate, vp8, codec, v.displayHeight);
-            p.degradationPreference = automaticQuality
-                    ? RtpParameters.DegradationPreference.MAINTAIN_FRAMERATE
-                    : RtpParameters.DegradationPreference.BALANCED;
+            p.degradationPreference = profile.balanceDetail(v.displayHeight)
+                    ? RtpParameters.DegradationPreference.BALANCED
+                    : RtpParameters.DegradationPreference.MAINTAIN_FRAMERATE;
             for (RtpParameters.Encoding e : p.encodings) {
                 e.maxBitrateBps = profile.bitrate;
                 e.maxFramerate = profile.fps;

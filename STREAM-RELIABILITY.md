@@ -8,8 +8,15 @@ per viewer on larger displays. Smaller screens request 720p and up to 4 Mbps.
 The viewer's screen/viewport dimensions provide a display-size heuristic, not a
 benchmark of decoder capacity. Each approved viewer sends their own bounded
 request through the existing encrypted signalling connection. Manual host quality
-still wins. Both Android and browser senders prefer reducing resolution to retain
-motion when WebRTC detects resource pressure. The existing conservative VP8
+still wins. Smaller-screen Auto favours frame rate. Larger-screen Auto balances
+resolution and frame rate so that motion does not always take precedence over
+detail. Both remain subject to WebRTC's network and resource adaptation.
+The Android sender gives each new peer a one-time starting bandwidth estimate
+of at most 2.5 Mbps (or the lower configured ceiling), with no forced minimum.
+If the engine rejects the hint it retains its normal estimate. Native diagnostics
+report whether the API accepted it; acceptance does not prove a faster/sharper
+startup on physical hardware. There is no browser SDP bitrate manipulation.
+The existing conservative VP8
 fallback stays capped at 720p, 24 fps and 2.5 Mbps. These are upper limits, not
 promised throughput, frame rates or upload requirements; audio and transport add
 overhead. Manual quality modes remain available.
@@ -40,6 +47,15 @@ that the encoder sustains its maximum resolution. Actual running stats and a sho
 physical capture test provide that evidence.
 
 ## Simulated network validation
+
+The host's **Copy picture diagnostics** button exports selected device/version
+metadata and numbered per-viewer resolution, fps, measured bitrate, target bitrate
+when available, codec/profile/encoder and selected route. Names, room codes, peer
+IDs, candidate addresses and raw stats are excluded. A readable report is shown
+if the TV WebView has no clipboard. A network limitation is not attributed solely
+to host upload: the bottleneck may be elsewhere along the path. Reported codec
+profile and target bitrate are marked unknown when the engine does not expose
+them. No diagnostics are uploaded automatically.
 
 The Chromium CI scenario uses a moving, complex synthetic picture and generated
 audio. Linux traffic control applies bandwidth limits, delay and packet loss to

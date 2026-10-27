@@ -79,6 +79,8 @@ body {
 .startup-label { color: var(--muted); font-size: 16px; }
 .viewer-display { display: flex; align-items: center; gap: 8px; margin-left: auto; font-size: 14px; }
 .viewer-display select { width: auto; min-height: 44px; max-width: 190px; }
+.diagnostics-report { width: 100%; min-height: 100px; max-height: 180px; resize: vertical; font-size: 14px; }
+#screen-diag { pointer-events: none; }
 #viewer-controls { flex-wrap: wrap; gap: 8px; }
 @media (max-width: 600px) {
   .viewer-display { flex-basis: 100%; margin-left: 0; justify-content: space-between; }

@@ -21,6 +21,7 @@
   <script src="config.js"></script>
   <script src="qr.js" defer></script>
   <script src="quality-policy.js" defer></script>
+  <script src="diagnostics.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -384,6 +385,8 @@
           </div>
           <div class="health-col">
           <ul class="viewer-health" id="viewer-health" hidden aria-label="How each friend's picture is doing"></ul>
+            <button class="small" id="copy-diagnostics" type="button">Copy picture diagnostics</button>
+            <textarea id="diagnostics-report" class="diagnostics-report" aria-label="Picture diagnostics report" readonly hidden></textarea>
             <div class="sound-tests" role="group" aria-label="Sound tests">
               <button class="small" id="test-sound" type="button" hidden>Send a test beep</button>
               <button class="small" id="test-tv-capture" type="button" hidden>Test TV sound capture</button>

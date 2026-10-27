@@ -1,6 +1,9 @@
 // Requests are ceilings; WebRTC still owns congestion and encoder adaptation.
 ((root) => {
   const policy = {
+    preference(quality, displayHeight) {
+      return !quality.automatic || displayHeight >= 1080 ? "balanced" : "maintain-framerate";
+    },
     displayHeight({ width = 0, height = 0, tv = false, mode = "auto" } = {}) {
       if (mode === "tv" || tv) return 1080;
       return Math.min(width, height) >= 600 || Math.max(width, height) >= 1000 ? 1080 : 720;

@@ -96,6 +96,7 @@
               encoding.maxBitrate = limits.maxBitrate;
               encoding.scaleResolutionDownBy = Math.max(1, (sender.track.getSettings().height || limits.height) / limits.height);
             }
+            params.degradationPreference = window.BoxxieQuality.preference(quality, d.displayHeight);
             await sender.setParameters(params);
           }
         }
