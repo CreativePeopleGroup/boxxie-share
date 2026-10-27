@@ -66,6 +66,11 @@ OS suspends all page execution. Server closure/expiry, invalid host credentials,
 account expiry and a replacement host remain authoritative: a closed room is not
 silently recreated. The server's three-minute host grace period is unchanged.
 Viewer messages distinguish host-connection timeout from an explicit host End.
+Every replacement native viewer peer gets a fresh negotiation session ID; queued
+ICE/state/SDP callbacks from a replaced peer are ignored. The browser also detects
+changed SDP origin IDs for older APKs that reused capture-level session IDs, and
+retains a bounded candidate queue across that legacy replacement. Repeated host
+recovery is tested with both current and legacy signalling formats.
 
 The Chromium CI scenario uses a moving, complex synthetic picture and generated
 audio. Linux traffic control applies bandwidth limits, delay and packet loss to

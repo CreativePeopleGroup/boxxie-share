@@ -1622,14 +1622,19 @@
   }
   function screenSignal(from, data) {
     let sp = screenPeers.get(from);
+    // Older APKs reused their capture session ID for a replacement native peer.
+    // SDP's origin session ID distinguishes that from an offer on the same peer.
+    const origin = data.sdp?.type === "offer" ? String(data.sdp.sdp || "").match(/^o=\S+\s+(\S+)\s+/m)?.[1] : null;
+    let pending = [];
     // A new sharing session (the host restarted sharing or the app reconnected) starts afresh.
-    if (sp && data.session && sp.session !== data.session) {
+    if (sp && ((data.session && sp.session !== data.session) || (origin && sp.origin && origin !== sp.origin))) {
+      if (data.session === sp.session) pending = sp.pending;
       closeScreenPeer(from);
       sp = null;
     }
     if (!sp) {
       const pc = new RTCPeerConnection({ iceServers: S.ice, bundlePolicy: "max-bundle" });
-      sp = { pc, session: data.session, pending: [], tracks: new Set(), from, started: Date.now() };
+      sp = { pc, session: data.session, origin, pending, tracks: new Set(), from, started: Date.now() };
       sp.timer = setInterval(() => screenDiag(sp), 2000);
       pc.onicecandidate = (e) => {
         if (e.candidate) send({ type: "signal", to: from, data: { ch: "screen", session: sp.session, candidate: e.candidate.toJSON() } });
@@ -1647,14 +1652,20 @@
     (async () => {
       try {
         if (data.sdp) {
+          if (origin) sp.origin = origin;
           await pc.setRemoteDescription(data.sdp);
+          if (screenPeers.get(from) !== sp) return;
           if (data.sdp.type === "offer") {
             await pc.setLocalDescription(await pc.createAnswer());
+            if (screenPeers.get(from) !== sp) return;
             send({ type: "signal", to: from, data: { ch: "screen", session: sp.session, displayHeight: receiverDisplayHeight(), sdp: { type: pc.localDescription.type, sdp: pc.localDescription.sdp } } });
           }
           for (const c of sp.pending.splice(0)) await pc.addIceCandidate(c).catch(() => {});
         } else if (data.candidate) {
-          if (pc.remoteDescription) await pc.addIceCandidate(data.candidate).catch(() => {});
+          if (pc.remoteDescription) await pc.addIceCandidate(data.candidate).catch(() => {
+            // A legacy sender can send new-peer candidates before its new offer.
+            if (sp.pending.length < 32) sp.pending.push(data.candidate);
+          });
           else sp.pending.push(data.candidate);
         } else if (data.bye) {
           closeScreenPeer(from);

@@ -6,6 +6,7 @@
   const emit = (ev) => setTimeout(() => window.boxxieNativeEvent && window.boxxieNativeEvent(JSON.stringify(ev)), 0);
   let ice = [], stream = null, session = null, timer = null, playbackPaused = false;
   const pcs = new Map();
+  let generation = 0;
   function makeStream() {
     const c = document.createElement("canvas"); c.width = 1280; c.height = 720;
     const g = c.getContext("2d"); let n = 0;
@@ -57,6 +58,8 @@
       if (!stream) return;
       if (pcs.has(id)) pcs.get(id).close();
       const pc = new RTCPeerConnection({ iceServers: ice });
+      const peerSession = window.__legacyPeerSession ? session : session + "-" + (++generation);
+      pc.__session = peerSession;
       pcs.set(id, pc);
       for (const t of stream.getTracks()) {
         const quality = window.__lastShareConfig && window.__lastShareConfig.quality;
@@ -68,8 +71,8 @@
           await tx.sender.setParameters(params);
         }
       }
-      pc.onicecandidate = (e) => e.candidate && emit({ type: "signal", peer: id, data: { session, candidate: e.candidate.toJSON() } });
-      pc.oniceconnectionstatechange = () => emit({ type: "viewer-state", peer: id, ice: pc.iceConnectionState });
+      pc.onicecandidate = (e) => e.candidate && pcs.get(id) === pc && emit({ type: "signal", peer: id, data: { session: peerSession, candidate: e.candidate.toJSON() } });
+      pc.oniceconnectionstatechange = () => pcs.get(id) === pc && emit({ type: "viewer-state", peer: id, ice: pc.iceConnectionState });
       const tick = setInterval(async () => {
         if (pc.connectionState === "closed") return clearInterval(tick);
         let frames = 0, bytes = 0;
@@ -77,13 +80,13 @@
         emit({ type: "viewer-stats", peer: id, ice: pc.iceConnectionState, frames, bytes, codec: "VP8", encoder: "test", vp8: false, sound: true, fps: 24, limit: "none" });
       }, 1500);
       await pc.setLocalDescription(await pc.createOffer());
-      emit({ type: "signal", peer: id, data: { session, sdp: { type: "offer", sdp: pc.localDescription.sdp } } });
+      emit({ type: "signal", peer: id, data: { session: peerSession, sdp: { type: "offer", sdp: pc.localDescription.sdp } } });
     },
     signal: async (id, json) => {
       const pc = pcs.get(id); if (!pc) return;
       try {
       const d = JSON.parse(json);
-      if (d.session && d.session !== session) return;
+      if (d.session && d.session !== pc.__session) return;
       if (d.displayHeight !== undefined) {
         window.__lastDisplayHeight = d.displayHeight;
         const quality = window.__lastShareConfig && window.__lastShareConfig.quality;
@@ -114,7 +117,7 @@
     stopScreenShare: () => {
       window.__nativeCalls.push("stop");
       try { sessionStorage.removeItem("fakeSharing"); } catch (e) {}
-      for (const [id, pc] of pcs) { emit({ type: "signal", peer: id, data: { session, bye: true } }); pc.close(); }
+      for (const [id, pc] of pcs) { emit({ type: "signal", peer: id, data: { session: pc.__session, bye: true } }); pc.close(); }
       pcs.clear(); clearInterval(timer); if (stream) stream.getTracks().forEach((t) => t.stop()); stream = null;
     },
     goHome: () => window.__nativeCalls.push("home"),

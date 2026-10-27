@@ -462,6 +462,8 @@ async function mediaProgress(page) {
     assert.equal(await host.locator('#request-list .allow').count(), 0, 'Host recovery needs no new approval');
     console.log(`PASS ${engine}: brief host interruption preserves room and resumes media`);
     await host.evaluate(() => {
+      // Older installed APKs reused one session ID across replacement peers.
+      window.__legacyPeerSession = true;
       const now = Date.now;
       Date.now = () => now() + 120000;
       window.dispatchEvent(new Event('online'));
