@@ -198,11 +198,12 @@
     signOutLocal("Please sign in first.");
     return null;
   }
-  async function api(path, { method = "GET", body } = {}) {
+  async function api(path, { method = "GET", body, signal } = {}) {
     let res;
     try {
       res = await fetch(SERVER + path, {
         method,
+        signal,
         headers: { "Content-Type": "application/json", ...(S.session ? { Authorization: "Bearer " + S.session.token } : {}) },
         body: body ? JSON.stringify(body) : undefined,
       });
@@ -214,8 +215,12 @@
     return { ok: res.ok, status: res.status, data };
   }
   async function getTicket() {
-    const r = await api("/api/ticket", { method: "POST" });
-    return r.ok ? r.data.ticket : null;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    try {
+      const r = await api("/api/ticket", { method: "POST", signal: controller.signal });
+      return r.ok ? r.data.ticket : null;
+    } finally { clearTimeout(timeout); }
   }
   function setSession(r) {
     S.session = { token: r.token, user: r.user };
@@ -1128,12 +1133,21 @@
     let vpn = false;
     try { vpn = typeof NATIVE.networkInfo === "function" && !!JSON.parse(NATIVE.networkInfo()).vpn; } catch {}
     $("vpn-note").hidden = !(vpn && S.nativeSharing); // only the sharing TV ever runs this
+    $("vpn-help").hidden = !(vpn && S.nativeSharing);
   }
   setInterval(() => S.nativeSharing && checkVpn(), 15000);
 
   // ----- TV app: how each friend's picture is doing (shown under "Friends join here") -----
   const health = new Map();
   let localAudioHealth = null;
+  $("help-open").onclick = () => {
+    $("picture-help").hidden = false;
+    $("copy-diagnostics").focus();
+  };
+  $("help-close").onclick = () => {
+    $("picture-help").hidden = true;
+    $("help-open").focus();
+  };
   $("copy-diagnostics").onclick = async () => {
     const active = (S.roster || []).filter(v => !v.companionOf).map(v => health.get(v.id) || {});
     const report = window.BoxxieDiagnostics.report({
@@ -1239,8 +1253,12 @@
       const id = v.id;
       const h = health.get(id) || {};
       const li = document.createElement("li");
-      const who = document.createElement("b");
+      const who = document.createElement("button");
+      who.className = "health-person";
+      who.type = "button";
       who.textContent = v.name || S.names.get(id) || "Friend";
+      who.setAttribute("aria-label", `Manage ${who.textContent}`);
+      who.onclick = () => openPerson(v, true);
       const st = document.createElement("span");
       const ice = h.ice || "new";
       let text;
@@ -1248,18 +1266,7 @@
         text = "can't connect (network)";
         li.className = "bad";
       } else if ((ice === "connected" || ice === "completed") && h.frames > 0) {
-        const busy = h.limit === "cpu" ? " (encoder busy)" : h.limit === "bandwidth" ? " (network limited)" : "";
-        const why = {
-          "no-permission": " · no sound: Boxxie isn't allowed to record sound",
-          error: " · no sound: recording didn't start",
-          silent: " · captured audio is silent",
-          nodata: " · no audio samples available",
-          none: " · no sound",
-        }[h.audioState];
-        const snd = h.sound === undefined ? "" : !h.sound ? why || " · no sound playing" : h.soundSending === false ? " · sound not sending" : " and sound";
-        text = `getting the picture${snd}${h.height ? ` · ${qualityName(h.height)}` : ""} · ${h.codec || "video"}${h.fps ? ` · ${h.fps} fps${busy}` : ""}`;
-        if (h.mbps !== undefined) text += ` · ${h.mbps.toFixed(1)} Mbps`;
-        if (h.route && h.route !== "unknown") text += ` · ${h.route}`;
+        text = `getting the picture${h.sound ? " and sound" : h.sound === false ? " · no sound yet" : ""}${h.height ? ` · ${qualityName(h.height)}` : ""}`;
         li.className = "ok";
       } else if (ice === "connected" || ice === "completed") {
         text = h.vp8 ? "connected, trying another video format…" : "connected, starting the picture…";
@@ -1269,13 +1276,7 @@
       st.textContent = text;
       const right = document.createElement("span");
       right.className = "vh-right";
-      const rm = document.createElement("button");
-      rm.className = "small";
-      rm.type = "button";
-      rm.textContent = "Remove";
-      rm.setAttribute("aria-label", `Remove ${v.name} from the room`);
-      rm.onclick = () => openPerson(v, true);
-      right.append(st, rm);
+      right.append(st);
       li.append(who, right);
       list.append(li);
     }
@@ -1621,14 +1622,19 @@
   }
   function screenSignal(from, data) {
     let sp = screenPeers.get(from);
+    // Older APKs reused their capture session ID for a replacement native peer.
+    // SDP's origin session ID distinguishes that from an offer on the same peer.
+    const origin = data.sdp?.type === "offer" ? String(data.sdp.sdp || "").match(/^o=\S+\s+(\S+)\s+/m)?.[1] : null;
+    let pending = [];
     // A new sharing session (the host restarted sharing or the app reconnected) starts afresh.
-    if (sp && data.session && sp.session !== data.session) {
+    if (sp && ((data.session && sp.session !== data.session) || (origin && sp.origin && origin !== sp.origin))) {
+      if (data.session === sp.session) pending = sp.pending;
       closeScreenPeer(from);
       sp = null;
     }
     if (!sp) {
       const pc = new RTCPeerConnection({ iceServers: S.ice, bundlePolicy: "max-bundle" });
-      sp = { pc, session: data.session, pending: [], tracks: new Set(), from, started: Date.now() };
+      sp = { pc, session: data.session, origin, pending, tracks: new Set(), from, started: Date.now() };
       sp.timer = setInterval(() => screenDiag(sp), 2000);
       pc.onicecandidate = (e) => {
         if (e.candidate) send({ type: "signal", to: from, data: { ch: "screen", session: sp.session, candidate: e.candidate.toJSON() } });
@@ -1646,14 +1652,20 @@
     (async () => {
       try {
         if (data.sdp) {
+          if (origin) sp.origin = origin;
           await pc.setRemoteDescription(data.sdp);
+          if (screenPeers.get(from) !== sp) return;
           if (data.sdp.type === "offer") {
             await pc.setLocalDescription(await pc.createAnswer());
+            if (screenPeers.get(from) !== sp) return;
             send({ type: "signal", to: from, data: { ch: "screen", session: sp.session, displayHeight: receiverDisplayHeight(), sdp: { type: pc.localDescription.type, sdp: pc.localDescription.sdp } } });
           }
           for (const c of sp.pending.splice(0)) await pc.addIceCandidate(c).catch(() => {});
         } else if (data.candidate) {
-          if (pc.remoteDescription) await pc.addIceCandidate(data.candidate).catch(() => {});
+          if (pc.remoteDescription) await pc.addIceCandidate(data.candidate).catch(() => {
+            // A legacy sender can send new-peer candidates before its new offer.
+            if (sp.pending.length < 32) sp.pending.push(data.candidate);
+          });
           else sp.pending.push(data.candidate);
         } else if (data.bye) {
           closeScreenPeer(from);
@@ -1743,6 +1755,7 @@
     if (S.closing || !S.role) return;
     if (!ticket) {
       if (S.session && S.role === "viewer") return rejoinSoon();
+      if (S.session && S.role === "host") return reconnectHostSoon();
       return failConnect("signed_out");
     }
     const q = `ticket=${encodeURIComponent(ticket)}&` + (S.role === "host"
@@ -1755,7 +1768,7 @@
       ws = new WebSocket(`${WS_SERVER}/api/rooms/${S.code}/ws?${q}`);
     } catch {
       if (S.role === "viewer") return rejoinSoon();
-      return failConnect("network");
+      return reconnectHostSoon();
     }
     S.ws = ws;
     let opened = false;
@@ -1763,6 +1776,8 @@
     ws.onopen = () => {
       if (S.ws !== ws || S.closing) { ws.close(); return; }
       opened = true;
+      S.lastHeard = Date.now();
+      clearTimeout(S.hostReconnectTimer);
       S.reconnectTries = 0;
       clearInterval(S.pingTimer);
       S.pingTimer = setInterval(() => send({ type: "ping" }), 25000);
@@ -1778,18 +1793,15 @@
       if (S.ws !== ws || S.closing) return;
       clearInterval(S.pingTimer);
       if (S.refused) return failConnect(S.refused);
+      if (ev.code === 4004) return onServer({ type: "room-closed", reason: ev.reason || "unknown" });
+      if (S.role === "host" && ev.code === 4000) return failConnect("host_replaced");
       if (S.role === "viewer" && ev.code === 4000) {
         return endWithMessage("Room opened elsewhere", "This account joined the room in another tab. You can rejoin here when you're ready.");
       }
       // Friends and paired phones: a locked screen or a signal drop isn't goodbye. Keep coming back.
       if (S.role === "viewer" && ev.code !== 4004 && ev.code !== 4003) return rejoinSoon();
+      if (S.role === "host" && ev.code !== 4003) return reconnectHostSoon();
       if (!opened) return failConnect("network");
-      if (S.role === "host" && ev.code !== 4004 && ev.code !== 4000 && (S.reconnectTries < 8 || S.nativeSharing)) {
-        S.reconnectTries++;
-        banner("Connection dropped. Reconnecting…");
-        setTimeout(() => S.ws === ws && connect(), Math.min(1000 * 2 ** S.reconnectTries, S.nativeSharing ? 5000 : 15000));
-        return;
-      }
       if (ev.code === 4004 || ev.code === 4003) return; // handled by room-closed / denied
       banner("You've been disconnected from the room.");
       if (S.role === "viewer") endWithMessage("Disconnected", "Your connection to the room dropped. Ask the host for the code and join again.");
@@ -1797,6 +1809,17 @@
   }
 
   // ----- Coming back after the phone locks or loses signal -----
+  function reconnectHostSoon() {
+    if (S.role !== "host" || S.closing || !S.session) return;
+    clearTimeout(S.hostReconnectTimer);
+    banner("Reconnecting the room. Keep your player open…");
+    S.reconnectTries++;
+    const wait = Math.min(1000 * 2 ** Math.min(S.reconnectTries, 4), 5000);
+    S.hostReconnectTimer = setTimeout(() => {
+      S.hostReconnectTimer = null;
+      if (S.role === "host" && !S.closing) connect();
+    }, wait);
+  }
   // The server lets people the host already let in straight back in, so this is seamless.
   function rejoinSoon() {
     clearTimeout(hostAwayTimer);
@@ -1814,7 +1837,20 @@
     S.rejoinTimer = setTimeout(() => S.role === "viewer" && !S.closing && connect(), wait);
   }
   function checkConnectionNow() {
-    if (S.closing || S.role !== "viewer") return;
+    if (S.closing || !S.role) return;
+    if (S.role === "host") {
+      if (!S.ws || S.ws.readyState > 1) {
+        clearTimeout(S.hostReconnectTimer);
+        connect();
+      } else if (S.ws.readyState === 1 && Date.now() - (S.lastHeard || Date.now()) > 90000) {
+        const stale = S.ws;
+        S.ws = null;
+        clearInterval(S.pingTimer);
+        try { stale.close(); } catch {}
+        reconnectHostSoon();
+      }
+      return;
+    }
     if (S.rejoinSince) {
       // Unlocked or back online: try again straight away
       clearTimeout(S.rejoinTimer);
@@ -1833,10 +1869,18 @@
   document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && checkConnectionNow());
   addEventListener("online", checkConnectionNow);
   addEventListener("pageshow", checkConnectionNow);
+  setInterval(() => { if (S.role === "host") checkConnectionNow(); }, 15000);
 
   function failConnect(reason) {
     if (S.role === "host" && reason === "not_host") forgetTVRoom();
     if (S.role === "host") {
+      if (["network", "signed_out"].includes(reason) && S.session) return reconnectHostSoon();
+      if (["room_not_found", "not_host", "host_replaced"].includes(reason)) {
+        forgetTVRoom();
+        return endWithMessage("Room no longer available", reason === "host_replaced"
+          ? "This room was opened by another host connection. Start a new room here when you're ready."
+          : "The server no longer has this room open. Start a new room to invite your friends again.");
+      }
       banner(ERRORS[reason] || ERRORS.network);
       return;
     }
@@ -1972,17 +2016,20 @@
         forgetTVRoom();
         if (S.role === "host") {
           cleanup();
+          S.role = null;
           show("home");
           toast({ expired: "The room reached its 12-hour limit and closed.", finished: "The film finished and the room closed.", idle: "Sharing stopped, so the room closed.", quiet: "Nothing played for a while, so the room closed." }[m.reason] || "Room closed.");
         } else {
           const why = {
             expired: "The room reached its 12-hour limit.",
+            "host-left": "The sharing device lost its room connection and couldn't reconnect within 3 minutes. The room has closed.",
+            ended: "The host ended the session. Thanks for watching.",
             "paired-left": "The TV this device was paired with has left the room.",
             "paired-elsewhere": "Another device has been paired with the TV instead.",
             finished: "The film has finished. Thanks for watching!",
             idle: "The host stopped sharing, so the room closed. Thanks for watching!",
             quiet: "Nothing has played on the TV for a while, so the room closed. Thanks for watching!",
-          }[m.reason] || "The host has ended the session. Thanks for watching.";
+          }[m.reason] || "The room is no longer available. Please ask the host to start a new room.";
           endWithMessage(m.reason && m.reason.startsWith("paired") ? "Call ended" : "The room has closed", why);
         }
         return;
@@ -3206,11 +3253,13 @@
     localAudioHealth = null;
     S.pendingFriendInvite = null;
     $("diagnostics-report").hidden = true;
+    $("picture-help").hidden = true;
     clearTimeout(hostAwayTimer);
     screenRestartAt.clear();
     connectionEpoch++;
     connectionPending = false;
     clearTimeout(S.rejoinTimer);
+    clearTimeout(S.hostReconnectTimer);
     S.rejoinSince = null;
     clearInterval(endTimer);
     S.endingWhy = null;
@@ -3300,7 +3349,7 @@
   }, 0));
   function focusables() {
     // An open app list keeps the remote inside it; switched-off (inert) parts are skipped.
-    const scope = !$("apps-panel").hidden ? $("apps-panel") : document;
+    const scope = !$("picture-help").hidden ? $("picture-help") : !$("apps-panel").hidden ? $("apps-panel") : document;
     return [...scope.querySelectorAll("button, input, select, .file-pick, [tabindex='0']")].filter((el) => {
       if (el.disabled || el.classList.contains("visually-hidden") || el.closest("[inert]")) return false;
       const r = el.getBoundingClientRect();
@@ -3340,6 +3389,7 @@
     const name = current && current.dataset.screen;
     if (!name || name === "home") return false;
     if (name === "room") {
+      if (!$("picture-help").hidden) { $("help-close").click(); return true; }
       // Back closes an open panel first (app list, invite, etc.)
       if (!$("apps-panel").hidden) {
         $("apps-close").click();

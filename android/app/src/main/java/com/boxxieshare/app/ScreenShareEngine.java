@@ -92,6 +92,7 @@ public final class ScreenShareEngine {
     private ByteBuffer playbackScratch;
     private volatile boolean sharing;
     private String session;
+    private long viewerGeneration;
 
     private final List<PeerConnection.IceServer> iceServers = new ArrayList<>();
     private int maxBitrate = 8_000_000;
@@ -584,8 +585,9 @@ public final class ScreenShareEngine {
             rtc.continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY;
             final Viewer v = new Viewer();
             v.vp8 = vp8;
-            v.sess = vp8 ? session + "-vp8" : session;
-            PeerConnection pc = factory.createPeerConnection(rtc, new PeerObserver(id));
+            // A replacement peer is a new negotiation, even within one capture.
+            v.sess = session + "-" + (++viewerGeneration) + (vp8 ? "-vp8" : "");
+            PeerConnection pc = factory.createPeerConnection(rtc, new PeerObserver(id, v));
             if (pc == null) return;
             v.pc = pc;
             viewers.put(id, v);
@@ -609,12 +611,17 @@ public final class ScreenShareEngine {
                 @Override
                 public void onCreateSuccess(SessionDescription sdp) {
                     final SessionDescription offer = new SessionDescription(sdp.type, preferCodec(sdp.description, v.vp8 ? "VP8" : "H264"));
-                    worker.execute(() -> pc.setLocalDescription(new SdpAdapter() {
-                        @Override
-                        public void onSetSuccess() {
-                            send(id, v.sess, safe(new JSONObject(), "sdp", safe(safe(new JSONObject(), "type", "offer"), "sdp", offer.description)));
-                        }
-                    }, offer));
+                    worker.execute(() -> {
+                        if (viewers.get(id) != v) return;
+                        pc.setLocalDescription(new SdpAdapter() {
+                            @Override
+                            public void onSetSuccess() {
+                                worker.execute(() -> {
+                                    if (viewers.get(id) == v) send(id, v.sess, safe(new JSONObject(), "sdp", safe(safe(new JSONObject(), "type", "offer"), "sdp", offer.description)));
+                                });
+                            }
+                        }, offer);
+                    });
                 }
             }, new MediaConstraints());
         }
@@ -783,6 +790,7 @@ public final class ScreenShareEngine {
                         @Override
                         public void onSetSuccess() {
                             worker.execute(() -> {
+                                if (viewers.get(id) != v) return;
                                 v.remoteSet = true;
                                 for (IceCandidate c : v.pending) v.pc.addIceCandidate(c);
                                 v.pending.clear();
@@ -906,19 +914,23 @@ public final class ScreenShareEngine {
 
     private class PeerObserver implements PeerConnection.Observer {
         private final String id;
+        private final Viewer expected;
 
-        PeerObserver(String id) {
+        PeerObserver(String id, Viewer expected) {
             this.id = id;
+            this.expected = expected;
         }
 
         @Override
         public void onIceCandidate(IceCandidate c) {
-            Viewer v = viewers.get(id);
-            String sess = v != null && v.sess != null ? v.sess : session;
-            try {
-                send(id, sess, new JSONObject().put("candidate", new JSONObject()
-                        .put("candidate", c.sdp).put("sdpMid", c.sdpMid).put("sdpMLineIndex", c.sdpMLineIndex)));
-            } catch (Exception ignored) {}
+            worker.execute(() -> {
+                if (viewers.get(id) != expected) return;
+                String sess = expected.sess;
+                try {
+                    send(id, sess, new JSONObject().put("candidate", new JSONObject()
+                            .put("candidate", c.sdp).put("sdpMid", c.sdpMid).put("sdpMLineIndex", c.sdpMLineIndex)));
+                } catch (Exception ignored) {}
+            });
         }
 
         @Override public void onSignalingChange(PeerConnection.SignalingState s) {}
@@ -926,7 +938,8 @@ public final class ScreenShareEngine {
             final String state = s.name().toLowerCase();
             worker.execute(() -> {
                 Viewer v = viewers.get(id);
-                if (v != null) v.ice = state;
+                if (v != expected) return;
+                v.ice = state;
                 try { emit(event("viewer-state").put("peer", id).put("ice", state)); } catch (Exception ignored) {}
             });
         }

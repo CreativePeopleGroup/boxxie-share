@@ -162,6 +162,10 @@ async function mediaProgress(page) {
     assert(initialCards.every((box, i) => box.every((v, j) => Math.abs(v - settledCards[i][j]) < 1)),
       'Home card geometry stays stable after startup and font loading');
     console.log(`PASS ${engine}: cold startup sizes TV cards before showing them, without a late font/layout jump`);
+    // Fail at the offending recovery/UI condition instead of waiting for the
+    // workflow's global timeout with no useful location or assertion.
+    host.setDefaultTimeout(20000);
+    viewer.setDefaultTimeout(20000);
     await viewer.goto(BASE);
     await viewer.locator('#go-friends').click();
     const publicId = (await viewer.locator('#my-friend-code').textContent()).replace(/-/g, '');
@@ -269,6 +273,7 @@ async function mediaProgress(page) {
     await viewer.locator('#friends-invite-list button').filter({hasText:'Join',exact:true}).click();
     await viewer.locator('#screen-room:not([hidden])').waitFor();
     assert.equal(await host.locator('#request-list .allow').count(),0,'Explicit host invitation supplies approval without a typed room code');
+    await host.locator('#help-open').click();
     await host.locator('#test-tv-capture').click();
     assert((await host.evaluate(() => window.__nativeCalls)).includes('tv-capture-test'),
       'TV sound capture control calls the Android bridge');
@@ -289,12 +294,23 @@ async function mediaProgress(page) {
       assert(Math.abs(groups[1][0].top - groups[1][1].top) < 1, 'Sharing buttons align horizontally');
     }
     await checkButtonGroups();
+    await host.locator('#help-close').click();
+    await host.evaluate(() => { document.getElementById('join-addr').textContent = 'creativepeoplegroup.github.io/boxxie-share'; });
+    const hostPanels = await host.locator('.join-row > div').evaluateAll(panels => panels.map(p => {
+      const r = p.getBoundingClientRect(); return {top:r.top,bottom:r.bottom,width:r.width};
+    }));
+    assert(hostPanels.length === 2 && Math.abs(hostPanels[0].top-hostPanels[1].top)<1 &&
+      Math.abs(hostPanels[0].bottom-hostPanels[1].bottom)<1 && Math.abs(hostPanels[0].width-hostPanels[1].width)<1,
+      'Host panels match in width, top and bottom alignment');
+    assert(await host.locator('#test-sound').isHidden(),'Troubleshooting tools stay off the main host screen');
     await host.screenshot({ path: `/tmp/boxxie-ui-tv-${engine}.png` });
+    await host.locator('#help-open').click();
     await host.setViewportSize({ width: 390, height: 844 });
     await host.evaluate(() => document.documentElement.classList.remove('tv'));
     await checkButtonGroups();
     await host.setViewportSize({ width: 1280, height: 720 });
     await host.evaluate(() => document.documentElement.classList.add('tv'));
+    await host.locator('#help-close').click();
     console.log(`PASS ${engine}: matched button dimensions and alignment at TV and phone widths`);
     try {
       await receiving(viewer);
@@ -356,6 +372,7 @@ async function mediaProgress(page) {
     await viewer.waitForFunction(() => document.getElementById('screen-diag').textContent.includes('Mbps received'));
     await viewer.evaluate(() => document.getElementById('viewer-status').click());
     console.log(`PASS ${engine}: viewer network diagnostics report measured receive bitrate`);
+    await host.locator('#help-open').click();
     await host.evaluate(() => {
       Object.defineProperty(navigator, 'clipboard', {configurable:true,value:{writeText:async()=>{throw new Error('Clipboard unavailable in TV WebView');}}});
       document.getElementById('copy-diagnostics').click();
@@ -365,6 +382,7 @@ async function mediaProgress(page) {
     assert(pictureReport.includes('Viewer 1') && pictureReport.includes('Codec:'), 'Copy fallback displays a useful report');
     assert(!pictureReport.includes(code) && !pictureReport.includes(`Audio ${engine}`), 'Report omits room code and viewer name');
     await host.evaluate(() => { document.getElementById('diagnostics-report').hidden = true; });
+    await host.locator('#help-close').click();
 
     const tracksBefore = await viewer.evaluate(() => document.getElementById('film').srcObject.getTracks().map(t => t.id).sort());
     const addsBefore = await host.evaluate(() => window.__nativeCalls.filter(c => c.startsWith('add:')).length);
@@ -427,14 +445,62 @@ async function mediaProgress(page) {
 
     // A brief host signalling interruption must not claim the host has dropped
     // or eject the viewer while changing players. Exercise the real host socket.
+    await host.route('**/api/ticket', route => route.abort());
+    const hostTicketFailed = host.waitForEvent('requestfailed', {
+      predicate: request => new URL(request.url()).pathname === '/api/ticket', timeout: 15000,
+    });
     await host.evaluate(() => window.__testSockets.filter(w =>
       w.url.includes('/api/rooms/') && w.readyState === 1).forEach(w => w.close()));
+    await hostTicketFailed;
+    assert(await host.locator('#screen-room').isVisible(),'A failed host ticket request keeps sharing active');
+    const duringBefore = await mediaProgress(viewer);
+    await new Promise(resolve => setTimeout(resolve,1000));
+    const duringAfter = await mediaProgress(viewer);
+    assert(duringAfter.frames > duringBefore.frames && duringAfter.energy > duringBefore.energy,
+      'Existing picture and sound continue during host ticket failure');
+    await host.unroute('**/api/ticket');
     await viewer.waitForFunction(() => document.getElementById('banner').textContent.includes("Waiting for the host's video"));
     assert(await viewer.locator('#screen-room').isVisible(), 'Host interruption keeps the viewer in the room');
     await viewer.waitForFunction(() => document.getElementById('banner').hidden);
     await receiving(viewer);
     assert.equal(await host.locator('#request-list .allow').count(), 0, 'Host recovery needs no new approval');
     console.log(`PASS ${engine}: brief host interruption preserves room and resumes media`);
+    await host.evaluate(() => {
+      // Older installed APKs reused one session ID across replacement peers.
+      window.__legacyPeerSession = true;
+      const now = Date.now;
+      Date.now = () => now() + 120000;
+      window.dispatchEvent(new Event('online'));
+      Date.now = now;
+    });
+    await host.waitForFunction(() => document.getElementById('banner').hidden);
+    await viewer.waitForFunction(() => document.getElementById('banner').hidden);
+    await receiving(viewer);
+    assert.equal(await host.locator('#viewer-health li').count(),1,'Host stale-socket recovery preserves the viewer');
+    console.log(`PASS ${engine}: host ticket failure and stale signalling recover automatically`);
+    await host.evaluate(() => {
+      const NativeSocket = window.WebSocket;
+      window.__restoreSocket = () => { window.WebSocket = NativeSocket; };
+      window.__testConstructFailures = 0;
+      let failNext = true;
+      window.WebSocket = new Proxy(NativeSocket, { construct(Target,args) {
+        if (failNext && String(args[0]).includes('/api/rooms/')) {
+          failNext = false;
+          window.__testConstructFailures++;
+          throw new DOMException('Simulated socket construction failure','NetworkError');
+        }
+        return Reflect.construct(Target,args);
+      }});
+      window.__testSockets.filter(w => w.url.includes('/api/rooms/') && w.readyState === 1).forEach(w => w.close());
+    });
+    // Observe the injected failure itself, not a banner that may already have
+    // disappeared before automation polls it. Bound these recovery checks.
+    await host.waitForFunction(() => window.__testConstructFailures === 1, null, {timeout:20000});
+    await host.waitForFunction(() => document.getElementById('banner').hidden &&
+      window.__testSockets.some(w => w.url.includes('/api/rooms/') && w.readyState === 1), null, {timeout:20000});
+    await host.evaluate(() => window.__restoreSocket());
+    await receiving(viewer);
+    console.log(`PASS ${engine}: host retries a WebSocket constructor failure without another user action`);
 
     // Exercise a failed ticket fetch during a disconnect, then simultaneous wake/online events.
     await viewer.route('**/api/ticket', route => route.abort());
@@ -498,6 +564,16 @@ async function mediaProgress(page) {
     assert(await legacy.locator('[data-quality="auto"]').isHidden(), 'Older apps do not advertise unsupported Auto');
     assert.equal(await legacy.locator('[data-quality="hd"]').getAttribute('aria-checked'), 'true');
     await legacy.close();
+    await host.evaluate(() => {
+      const socket = window.__testSockets.find(w => w.url.includes('/api/rooms/') && w.readyState === 1);
+      socket.onmessage(new MessageEvent('message',{data:JSON.stringify({type:'refused',error:'room_not_found'})}));
+      socket.close();
+    });
+    await host.waitForFunction(() => document.getElementById('waiting-title').textContent === 'Room no longer available');
+    assert.equal(await host.evaluate(() => window.BoxxieNative.isSharing()),false,
+      'A definitive missing-room response stops stale native sharing');
+    await host.evaluate(() => window.dispatchEvent(new Event('online')));
+    assert(await host.locator('#screen-waiting').isVisible(),'A closed room does not pretend to be live');
     assert.deepEqual(errors, [], 'No uncaught browser errors');
   } finally {
     if (viewerBrowser) await viewerBrowser.close();

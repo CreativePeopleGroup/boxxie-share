@@ -1,6 +1,6 @@
 // Keeps the app shell available offline and installable. Always tries the network first
 // so updates arrive straight away; never caches anything from the connection server.
-const CACHE = "boxxie-share-v8";
+const CACHE = "boxxie-share-v9";
 const SHELL = ["./", "index.html", "style.css", "layout.js", "quality-policy.js", "diagnostics.js", "app.js", "qr.js", "config.js", "fonts/inter-latin.woff2", "manifest.webmanifest", "icons/icon-192.png", "icons/boxxie-logo.png"];
 
 self.addEventListener("install", (e) => {
