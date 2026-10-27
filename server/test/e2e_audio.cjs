@@ -264,8 +264,15 @@ async function mediaProgress(page) {
     try {
       await receiving(viewer);
       await viewer.setViewportSize({ width: 390, height: 844 });
+      await host.evaluate(() => { window.__lastDisplayHeight = null; });
       await viewer.locator('#viewer-display').selectOption('tv');
       await host.waitForFunction(() => window.__lastDisplayHeight === 1080);
+      const videoCaps = await host.evaluate(() => window.__audioTestPeers
+        .filter(pc => pc.connectionState === 'connected')
+        .flatMap(pc => pc.getSenders()).filter(sender => sender.track?.kind === 'video')
+        .flatMap(sender => sender.getParameters().encodings || []).map(e => e.maxBitrate));
+      assert(videoCaps.includes(networkTest ? 8000000 : 2500000),
+        'TV preference applies the Auto budget and preserves manual host quality');
       assert.equal(await viewer.evaluate(() => localStorage.getItem('bx:displayMode')), '"tv"');
       assert(await viewer.locator('#screen-room').isVisible(), 'Changing display preference keeps the room');
       await viewer.screenshot({ path: `/tmp/boxxie-ui-phone-${engine}.png` });
