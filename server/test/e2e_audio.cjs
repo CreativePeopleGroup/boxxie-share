@@ -477,18 +477,23 @@ async function mediaProgress(page) {
     await host.evaluate(() => {
       const NativeSocket = window.WebSocket;
       window.__restoreSocket = () => { window.WebSocket = NativeSocket; };
+      window.__testConstructFailures = 0;
       let failNext = true;
       window.WebSocket = new Proxy(NativeSocket, { construct(Target,args) {
         if (failNext && String(args[0]).includes('/api/rooms/')) {
           failNext = false;
+          window.__testConstructFailures++;
           throw new DOMException('Simulated socket construction failure','NetworkError');
         }
         return Reflect.construct(Target,args);
       }});
       window.__testSockets.filter(w => w.url.includes('/api/rooms/') && w.readyState === 1).forEach(w => w.close());
     });
-    await host.waitForFunction(() => document.getElementById('banner').textContent.includes('Reconnecting the room'));
-    await host.waitForFunction(() => document.getElementById('banner').hidden);
+    // Observe the injected failure itself, not a banner that may already have
+    // disappeared before automation polls it. Bound these recovery checks.
+    await host.waitForFunction(() => window.__testConstructFailures === 1, {timeout:20000});
+    await host.waitForFunction(() => document.getElementById('banner').hidden &&
+      window.__testSockets.some(w => w.url.includes('/api/rooms/') && w.readyState === 1), {timeout:20000});
     await host.evaluate(() => window.__restoreSocket());
     await receiving(viewer);
     console.log(`PASS ${engine}: host retries a WebSocket constructor failure without another user action`);
