@@ -10,6 +10,20 @@ import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
 
 public class ScreenShareServiceTest {
+    @Test public void keyboardPansInsteadOfResizingTheTVPicture() throws Exception {
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        factory.setNamespaceAware(true);
+        Element root = factory.newDocumentBuilder().parse(new File(System.getProperty("boxxie.manifest"))).getDocumentElement();
+        NodeList activities = root.getElementsByTagName("activity");
+        for (int i = 0; i < activities.getLength(); i++) {
+            Element activity = (Element) activities.item(i);
+            if (".MainActivity".equals(activity.getAttributeNS("http://schemas.android.com/apk/res/android", "name"))) {
+                assertEquals("adjustPan", activity.getAttributeNS("http://schemas.android.com/apk/res/android", "windowSoftInputMode"));
+                return;
+            }
+        }
+        fail("MainActivity is declared");
+    }
     @Test public void android11AndLaterDeclareForegroundRecordingCapability() {
         for (int sdk : new int[]{30, 31, 34, 36}) {
             int types = ScreenShareService.foregroundTypes(sdk, true);

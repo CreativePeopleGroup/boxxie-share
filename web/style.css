@@ -812,7 +812,28 @@ textarea:focus { border-color: rgba(239, 203, 153, 0.6); outline: none; }
 .tv .signin-tv #signin-site { word-break: break-all; }
 
 /* Friends page: friend code + add on the left; friends, then account and sign-in settings on the right */
-@media (min-width: 761px) { .friends-grid > .card:first-child { grid-row: span 2; } }
+#screen-friends { height: 100svh; min-height: 0; display: flex; flex-direction: column; padding-bottom: 20px; }
+.tv #screen-friends { height: calc(100svh / var(--tvz, 1)); min-height: 0; }
+#screen-friends .topbar { flex: none; flex-wrap: nowrap; }
+#screen-friends .friends-grid { flex: 1; min-height: 0; align-items: stretch; }
+#screen-friends .card { min-height: 0; overflow-y: auto; }
+#screen-friends .friend-list li { flex-wrap: wrap; align-items: stretch; }
+#screen-friends .friend-list li .chip { flex-basis: 100%; }
+#screen-friends .friend-list li button { flex: 1 1 0; min-width: 0; min-height: 44px; white-space: normal; justify-content: center; }
+#screen-friends .topbar button { min-width: 100px; min-height: 44px; justify-content: center; }
+.friend-code-row button, .row-form button { min-height: 44px; justify-content: center; }
+.friend-code-row button { min-width: 72px; }
+.account-screen .account-card { max-width: 760px; margin: 0 auto; }
+@media (max-width: 860px) {
+  #screen-friends .friends-grid { grid-template-columns: 1fr; grid-template-rows: auto minmax(120px, 1fr); overflow-y: auto; }
+  #screen-friends .friends-grid > .card { order: 0; }
+  #screen-friends .friend-code-row { flex-wrap: wrap; }
+}
+@media (max-width: 860px) {
+  .keyboard-portrait .room:not(.call-mode) .stage-col { position: sticky; inset: auto; height: auto; }
+  .keyboard-portrait .room:not(.call-mode) .stage { aspect-ratio: 16 / 9; height: auto; flex: none; }
+  .keyboard-portrait .room:not(.call-mode) .dock { left: 0; right: 0; transform: none; border-radius: 0; }
+}
 
 /* ----- TV: pick one of the TV's apps to open while sharing ----- */
 .sheet.apps-panel { width: min(1040px, calc(100% - 48px)); }
