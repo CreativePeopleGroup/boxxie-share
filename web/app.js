@@ -53,6 +53,9 @@
     fitTV();
     let fittedWidth = innerWidth, fittedHeight = innerHeight;
     addEventListener("resize", () => {
+      // A software keyboard is not a smaller TV. Android pans focused fields;
+      // retain sizing too if a vendor WebView still reports a keyboard resize.
+      if (isTyping() && innerWidth === fittedWidth && innerHeight < fittedHeight - 100) return;
       // Some TV WebViews notify resize after content/focus changes even when
       // the viewport is unchanged. Do not reset the fitted zoom for those.
       if (innerWidth === fittedWidth && innerHeight === fittedHeight) return;
@@ -210,6 +213,7 @@
     afterSignIn();
   }
   function signOutLocal(message) {
+    S.pendingFriendInvite = null;
     S.session = null;
     S.me = null;
     store.del("session");
@@ -333,9 +337,9 @@
 
   // ----- invites on the home screen -----
   function renderInvites() {
-    const list = $("invite-list");
-    list.replaceChildren();
     const invites = (S.me && S.me.invites) || [];
+    for (const list of [$("invite-list"), $("friends-invite-list")]) {
+    list.replaceChildren();
     invites.forEach((inv) => {
       const li = document.createElement("li");
       const av = document.createElement("span");
@@ -363,7 +367,9 @@
       li.append(av, what, join, no);
       list.append(li);
     });
+    }
     $("invites").hidden = invites.length === 0;
+    $("friends-invites").hidden = invites.length === 0;
   }
 
   // ----- friends screen -----
@@ -374,7 +380,9 @@
     show("friends");
     loadMe();
   };
-  $("friends-back").onclick = () => show("home");
+  $("friends-back").onclick = () => show(S.role ? "room" : "home");
+  $("account-open").onclick = () => { $("rename-input").value = myName(); show("account"); };
+  $("account-back").onclick = () => show("friends");
   $("friend-code-copy").onclick = async () => {
     try {
       await navigator.clipboard.writeText($("my-friend-code").textContent);
@@ -461,7 +469,18 @@
     const blockF = (f) => () => {
       if (confirm(`Block ${f.name}? They'll be removed from your friends and can't invite you or join your rooms.`)) blockUser(f.id, f.name);
     };
-    $("friend-list").replaceChildren(...mine.map((f) => friendRow(f, [["Remove", "deny", remove(f, true)], ["Block", "deny", blockF(f)]])));
+    $("friend-list").replaceChildren(...mine.map((f) => friendRow(f, [
+      [S.invitedIds?.has(f.id) && S.role === "host" ? "Invite again" : "Invite to watch", "primary", async () => {
+        if (S.role === "viewer") return toast("Leave the current room before starting your own.");
+        if (S.role === "host" && S.code) {
+          await inviteFriendToWatch(f.id);
+          return;
+        }
+        S.pendingFriendInvite = f.id;
+        show("home");
+        toast(`Choose what to share, then Start sharing to invite ${f.name}.`, 8000);
+      }], ["Remove", "deny", remove(f, true)], ["Block", "deny", blockF(f)]
+    ])));
     $("friend-requests").replaceChildren(...reqs.map((f) => friendRow(f, [["Accept", "allow", respond(f, true)], ["Decline", "deny", respond(f, false)], ["Block", "deny", blockF(f)]])));
     const blocked = (S.me && S.me.blocked) || [];
     $("blocked-list").replaceChildren(...blocked.map((b) => friendRow(b, [["Unblock", "", () => unblockUser(b.id, b.name)]])));
@@ -649,7 +668,7 @@
       const sess = S.pendingSession;
       S.pendingSession = null;
       setSession(sess);
-    } else show("friends");
+    } else show("account");
   });
 
   // ----- TV: sign in by scanning a QR code with your phone -----
@@ -1830,6 +1849,11 @@
         S.ice = m.iceServers || [];
         if (S.native) try { NATIVE.setIceServers(JSON.stringify(S.ice)); } catch {}
         banner("");
+        if (S.pendingFriendInvite) {
+          const friendId = S.pendingFriendInvite;
+          S.pendingFriendInvite = null;
+          inviteFriendToWatch(friendId);
+        }
         return;
       case "waiting": // viewer
         S.myId = m.id;
@@ -2108,6 +2132,18 @@
   $("lock-room").onclick = () => send({ type: "lock", locked: !S.locked });
 
   S.invitedIds = new Set();
+  async function inviteFriendToWatch(id) {
+    if (S.role !== "host" || !S.code) return;
+    const code = S.code;
+    const r = await api(`/api/rooms/${code}/invite`, { method: "POST", body: { hostToken: S.hostToken, friendIds: [id] } });
+    if (S.code !== code || S.role !== "host") return;
+    if (r.ok && r.data.invited?.includes(id)) {
+      S.invitedIds.add(id);
+      toast("Invitation sent. They can press Join without entering a room code.");
+    } else toast("Couldn't invite them. Check that you're still friends and try again.");
+    renderFriends();
+    renderInvitePanel();
+  }
   $("invite-open").onclick = async () => {
     $("invite-panel").hidden = false;
     renderInvitePanel();
@@ -2119,6 +2155,13 @@
   $("invite-close").onclick = () => {
     $("invite-panel").hidden = true;
     $("invite-open").focus();
+  };
+  $("friends-manage").onclick = () => {
+    $("invite-panel").hidden = true;
+    $("rename-input").value = myName();
+    renderFriends();
+    show("friends");
+    loadMe();
   };
   function renderInvitePanel() {
     const friends = ((S.me && S.me.friends) || []).filter((f) => f.status === "friends");
@@ -2137,10 +2180,7 @@
         b.textContent = "Invite";
         b.onclick = async () => {
           b.disabled = true;
-          const r = await api(`/api/rooms/${S.code}/invite`, { method: "POST", body: { hostToken: S.hostToken, friendIds: [f.id] } });
-          if (r.ok && r.data.invited.includes(f.id)) S.invitedIds.add(f.id);
-          else toast("Couldn't invite them. Try again.");
-          renderInvitePanel();
+          await inviteFriendToWatch(f.id);
         };
         li.append(b);
       }
@@ -3154,6 +3194,7 @@
     S.closing = true;
     health.clear();
     localAudioHealth = null;
+    S.pendingFriendInvite = null;
     $("diagnostics-report").hidden = true;
     clearTimeout(hostAwayTimer);
     screenRestartAt.clear();
@@ -3239,6 +3280,14 @@
     const a = document.activeElement;
     return a && ((a.tagName === "INPUT" && !["range", "file", "button"].includes(a.type)) || a.tagName === "TEXTAREA");
   }
+  document.addEventListener("focusin", () => {
+    if (isTV || !isTyping() || root.classList.contains("keyboard-open")) return;
+    root.classList.add("keyboard-open");
+    root.classList.toggle("keyboard-portrait", innerHeight >= innerWidth);
+  });
+  document.addEventListener("focusout", () => setTimeout(() => {
+    if (!isTyping()) root.classList.remove("keyboard-open", "keyboard-portrait");
+  }, 0));
   function focusables() {
     // An open app list keeps the remote inside it; switched-off (inert) parts are skipped.
     const scope = !$("apps-panel").hidden ? $("apps-panel") : document;
@@ -3300,6 +3349,8 @@
       return true;
     }
     if (name === "signin") return false;
+    if (name === "account") { show("friends"); return true; }
+    if (name === "friends" && S.role) { show("room"); return true; }
     show(S.session ? "home" : "signin");
     return true;
   };

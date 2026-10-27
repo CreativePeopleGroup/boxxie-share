@@ -270,38 +270,38 @@
     <header class="topbar">
       <button class="small" id="friends-back">‹ Back</button>
       <h2>Friends</h2>
-      <span></span>
+      <button class="small" id="account-open">Account</button>
     </header>
     <div class="friends-grid">
       <div class="card">
-        <h3>Your friend code</h3>
+        <h3>Your Friend ID</h3>
         <div class="friend-code-row">
           <span class="friend-code" id="my-friend-code">…</span>
           <button class="small" id="friend-code-copy" type="button">Copy</button>
           <button class="small" id="friend-code-share" type="button" hidden>Share</button>
         </div>
-        <p class="note">Give this to friends so they can add you. It can't be used to sign in.</p>
+        <p class="note">Share this ID so friends can add you. Your private sign-in code is separate.</p>
         <h3>Add a friend</h3>
-        <p class="muted">Type their friend code (or the email they sign in with).</p>
+        <p class="muted">Enter their Friend ID. Once accepted, you can invite each other to watch.</p>
         <form id="friend-add-form" class="row-form" autocomplete="off">
-          <input id="friend-email" type="text" autocapitalize="characters" spellcheck="false" placeholder="Friend code, like K7FQ-2MXP" aria-label="Friend's code or email">
+          <input id="friend-email" type="text" autocapitalize="characters" spellcheck="false" placeholder="Friend ID, like K7FQ-2MXP" aria-label="Friend ID or email">
           <button class="primary" type="submit">Add</button>
         </form>
         <p class="note" id="friend-add-msg" role="status"></p>
-        <h3>Your name</h3>
-        <form id="rename-form" class="row-form" autocomplete="off">
-          <input id="rename-input" maxlength="40" aria-label="Your name">
-          <button type="submit">Save</button>
-        </form>
+
       </div>
-      <div class="card">
+      <div class="card friends-list-card">
+        <section id="friends-invites" hidden aria-label="Watch invitations">
+          <h3>Invitations to watch</h3>
+          <ul class="friend-list" id="friends-invite-list"></ul>
+        </section>
         <div id="friend-requests-wrap" hidden>
           <h3>Friend requests</h3>
           <ul class="friend-list" id="friend-requests"></ul>
         </div>
         <h3>Your friends</h3>
         <ul class="friend-list" id="friend-list"></ul>
-        <p class="muted" id="friends-empty">No friends yet. Add someone with their friend code.</p>
+        <p class="muted" id="friends-empty">No friends yet. Add someone using their Friend ID.</p>
         <div id="friend-sent-wrap" hidden>
           <h3>Waiting for them to accept</h3>
           <ul class="friend-list" id="friend-sent"></ul>
@@ -312,7 +312,21 @@
           <ul class="friend-list" id="blocked-list"></ul>
         </div>
       </div>
+
+    </div>
+  </section>
+
+  <section class="screen home account-screen" id="screen-account" data-screen="account" hidden>
+    <header class="topbar">
+      <button class="small" id="account-back">‹ Friends</button>
+      <h2>Account</h2>
+    </header>
       <div class="card account-card">
+        <h3>Your name</h3>
+        <form id="rename-form" class="row-form" autocomplete="off">
+          <input id="rename-input" maxlength="40" aria-label="Your name">
+          <button type="submit">Save</button>
+        </form>
         <h3>Your account</h3>
         <p class="note">Signed in as <span id="me-email"></span>. <a href="terms.html" target="_blank" rel="noopener">Terms</a> · <a href="privacy.html" target="_blank" rel="noopener">Privacy</a></p>
         <button class="small" id="report-problem">Report a problem or abuse</button>
@@ -324,7 +338,7 @@
         <h3>Signing in</h3>
         <div class="security-rows">
           <div class="sec-row">
-            <div><strong>Boxxie code</strong><span class="note">Lost it, or think someone saw it? Get a new one; the old one stops working.</span></div>
+            <div><strong>Private sign-in code</strong><span class="note">Lost it, or think someone saw it? Get a new one; the old one stops working.</span></div>
             <button class="small" id="code-reset" type="button">New code</button>
           </div>
           <div class="sec-row">
@@ -350,7 +364,6 @@
         </div>
         <button class="small deny" id="delete-account">Delete my account</button>
       </div>
-    </div>
   </section>
 
   <!-- ============ Waiting to be let in ============ -->
@@ -548,6 +561,7 @@
       <p class="note">Invited friends get a notification and go straight in.</p>
       <ul class="friend-list" id="invite-friends"></ul>
       <p class="muted" id="invite-empty" hidden>Add friends from the home screen first.</p>
+      <button class="small" id="friends-manage" type="button">Manage friends</button>
     </div>
 
     <div class="sheet airplay-panel" id="airplay-panel" hidden role="dialog" aria-label="Watch on Apple TV">

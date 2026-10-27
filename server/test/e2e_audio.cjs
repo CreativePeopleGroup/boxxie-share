@@ -162,6 +162,40 @@ async function mediaProgress(page) {
     assert(initialCards.every((box, i) => box.every((v, j) => Math.abs(v - settledCards[i][j]) < 1)),
       'Home card geometry stays stable after startup and font loading');
     console.log(`PASS ${engine}: cold startup sizes TV cards before showing them, without a late font/layout jump`);
+    await viewer.goto(BASE);
+    await viewer.locator('#go-friends').click();
+    const publicId = (await viewer.locator('#my-friend-code').textContent()).replace(/-/g, '');
+    assert(/^[A-Z0-9]{8}$/.test(publicId), 'A public Friend ID is available');
+    const signinWithFriendId = await fetch(`${BASE}auth/code/signin`, {
+      method:'POST', headers:{'Content-Type':'application/json','X-Test-IP':'10.77.11.9'}, body:JSON.stringify({code:publicId}),
+    });
+    assert.equal(signinWithFriendId.status,400,'Friend ID cannot sign in to an account');
+    await host.locator('#go-friends').click();
+    for (const size of [{width:1280,height:720},{width:960,height:540}]) {
+      await host.setViewportSize(size);
+      const fits = await host.evaluate(() => document.documentElement.scrollHeight <= innerHeight + 1 && document.documentElement.scrollWidth <= innerWidth + 1);
+      assert(fits,'Friends stays on one TV page');
+    }
+    await host.setViewportSize({width:1280,height:720});
+    await host.locator('#friend-email').focus();
+    const beforeKeyboard = await host.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--tvz'));
+    await host.setViewportSize({width:1280,height:400});
+    await host.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
+    assert.equal(await host.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--tvz')),beforeKeyboard,
+      'A TV keyboard height change does not shrink the interface');
+    await host.setViewportSize({width:1280,height:720});
+    await host.locator('#friend-email').fill(publicId);
+    await host.locator('#friend-add-form button').click();
+    await viewer.locator('#friend-requests button').filter({hasText:'Accept'}).click();
+    await host.locator('#friend-list button').filter({hasText:'Invite to watch'}).waitFor();
+    await host.locator('#account-open').click();
+    await host.locator('#screen-account:not([hidden])').waitFor();
+    assert(await host.locator('#rename-input').isVisible(),'Account settings remain accessible separately');
+    await host.locator('#account-back').click();
+    await host.screenshot({path:`/tmp/boxxie-ui-friends-${engine}.png`});
+    await host.locator('#friend-list button').filter({hasText:'Invite to watch'}).click();
+    await host.locator('#screen-home:not([hidden])').waitFor();
+    console.log(`PASS ${engine}: public Friend ID, one-page Friends, account separation and keyboard sizing`);
     await host.locator('[data-source="screen"]').click();
     await host.locator('#max-viewers').selectOption('8');
     for (const width of [960, 1280, 1920]) {
@@ -231,9 +265,9 @@ async function mediaProgress(page) {
       'The selected profile reaches the native bridge with its correct limits');
     await host.locator('#code-tiles .tile').first().waitFor({ state: 'attached' });
     const code = (await host.locator('#code-tiles .tile').allTextContents()).join('');
-    await viewer.goto(`${BASE}#join=${code}`);
-    await viewer.locator('#join-start').click();
-    await host.locator('#request-list .allow').click();
+    await viewer.locator('#friends-invite-list button').filter({hasText:'Join',exact:true}).click();
+    await viewer.locator('#screen-room:not([hidden])').waitFor();
+    assert.equal(await host.locator('#request-list .allow').count(),0,'Explicit host invitation supplies approval without a typed room code');
     await host.locator('#test-tv-capture').click();
     assert((await host.evaluate(() => window.__nativeCalls)).includes('tv-capture-test'),
       'TV sound capture control calls the Android bridge');
@@ -264,6 +298,14 @@ async function mediaProgress(page) {
     try {
       await receiving(viewer);
       await viewer.setViewportSize({ width: 390, height: 844 });
+      await viewer.locator('#chat-input').focus();
+      const pictureBefore = await viewer.locator('#film').boundingBox();
+      await viewer.setViewportSize({width:390,height:300});
+      const pictureWithKeyboard = await viewer.locator('#film').boundingBox();
+      assert(Math.abs(pictureBefore.width-pictureWithKeyboard.width)<1 && Math.abs(pictureBefore.height-pictureWithKeyboard.height)<1,
+        'Portrait video keeps its size while the keyboard reduces viewport height');
+      await viewer.setViewportSize({width:390,height:844});
+      await viewer.locator('#chat-input').blur();
       await host.evaluate(() => { window.__lastDisplayHeight = null; });
       await viewer.locator('#viewer-display').selectOption('tv');
       await host.waitForFunction(() => window.__lastDisplayHeight === 1080);
