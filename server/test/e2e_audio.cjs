@@ -491,9 +491,9 @@ async function mediaProgress(page) {
     });
     // Observe the injected failure itself, not a banner that may already have
     // disappeared before automation polls it. Bound these recovery checks.
-    await host.waitForFunction(() => window.__testConstructFailures === 1, {timeout:20000});
+    await host.waitForFunction(() => window.__testConstructFailures === 1, null, {timeout:20000});
     await host.waitForFunction(() => document.getElementById('banner').hidden &&
-      window.__testSockets.some(w => w.url.includes('/api/rooms/') && w.readyState === 1), {timeout:20000});
+      window.__testSockets.some(w => w.url.includes('/api/rooms/') && w.readyState === 1), null, {timeout:20000});
     await host.evaluate(() => window.__restoreSocket());
     await receiving(viewer);
     console.log(`PASS ${engine}: host retries a WebSocket constructor failure without another user action`);
