@@ -2,6 +2,10 @@
 // can be tested without network access. Run:  node --import ./test/register.mjs test/harness.mjs
 import worker, { Room, Limiter, Directory } from "../src/index.js";
 
+// Inspect structured events without printing room identifiers or thousands of creation logs.
+const connectionEvents = [];
+console.info = (entry) => connectionEvents.push(structuredClone(entry));
+
 // ---- Response that allows status 101 (WebSocket upgrade) ----
 const BaseResponse = globalThis.Response;
 globalThis.Response = class extends BaseResponse {
@@ -315,6 +319,66 @@ for (let i = 0; i < 12; i++) {
   }
 }
 ok(blockedAt !== null && blockedAt <= 10, `guessing codes is blocked after a few tries (blocked at attempt ${blockedAt})`);
+
+// A verified room owner can recover behind a shared IP block; impersonators cannot.
+{
+  const shared = { "CF-Connecting-IP": "198.51.100.210" };
+  const rm = await (await call("/api/rooms", { method: "POST", headers: shared, body: "{}" })).json();
+  const object = env.ROOM.get(rm.code);
+  const hostPath = `/api/rooms/${rm.code}/ws?role=host&token=${rm.hostToken}`;
+  let h = await connect(hostPath, shared);
+  await h.next(type("welcome"));
+  const firstSocket = object._host().ws;
+  // Repeated successful reconnects never consume the wrong-code budget.
+  for (let i = 0; i < 10; i++) {
+    h = await connect(hostPath, shared);
+    await h.next(type("welcome"));
+  }
+  const limiter = env.LIMITER.get(shared["CF-Connecting-IP"]);
+  ok(!(await limiter.blocked("joinfail", 8, 15 * 60 * 1000)), "successful host reconnects do not count as wrong codes");
+  await object.webSocketError(firstSocket);
+  ok(!(await object._ctx.storage.get("meta")).hostGoneAt, "a replaced host socket cannot mark the new host offline");
+  for (let i = 0; i < 8; i++) await limiter.hit("joinfail", 8, 15 * 60 * 1000);
+  h = await connect(hostPath, shared);
+  await h.next(type("welcome"));
+  ok(connectionEvents.some(e => e.event === "host_connected" && e.sharedIpBlockBypassed), "verified host recovers despite shared-IP guessing block");
+  for (const [path, as, label] of [
+    [hostPath.replace(rm.hostToken, "wrong"), "Ricky", "wrong host secret cannot bypass shared-IP block"],
+    [hostPath, "Sarah", "another account with the host secret cannot bypass shared-IP block"],
+    [`/api/rooms/${rm.code}/ws?role=viewer`, "Sarah", "viewer guessing protection remains active"],
+    [`/api/rooms/${rm.code}/ws?role=companion&pin=123456`, "Ricky", "pairing protection remains active"],
+  ]) {
+    try { await connect(path, shared, as); ok(false, label); }
+    catch (e) { ok(e.message === "too_many_attempts", label); }
+  }
+  try { await connect(hostPath, shared, "nobody"); ok(false, "host recovery requires a valid sign-in ticket"); }
+  catch (e) { ok(e.message === "signed_out", "host recovery requires a valid sign-in ticket"); }
+
+  h.sendJ({ type: "ping" });
+  await h.next(type("pong"));
+  const socket = object._host().ws;
+  const before = connectionEvents.filter(e => e.event === "host_disconnected").length;
+  await object.webSocketError(socket);
+  const missingAt = (await object._ctx.storage.get("meta")).hostGoneAt;
+  await object.webSocketClose(socket, 1006, "private-close-detail", false);
+  const after = connectionEvents.filter(e => e.event === "host_disconnected");
+  ok(after.length === before + 1 && after.at(-1).cause === "error" && after.at(-1).lastPingAgeMs !== null,
+    "host disconnect logs once with liveness age, without logging ping traffic");
+  ok((await object._ctx.storage.get("meta")).hostGoneAt === missingAt, "error followed by close does not restart host grace");
+  const meta = await object._ctx.storage.get("meta");
+  meta.hostGoneAt = Date.now() - 3 * 60 * 1000 - 1;
+  await object._ctx.storage.put("meta", meta);
+  await object.alarm();
+  const closed = connectionEvents.find(e => e.event === "room_closed" && e.roomRef === meta.logRef);
+  ok(closed?.reason === "host-left" && closed.hostMissingMs >= 180000 && !closed.hostConnected,
+    "host grace expiry logs the exact closure reason and missing duration");
+  const refs = connectionEvents.filter(e => e.roomRef === meta.logRef);
+  ok(refs.some(e => e.event === "room_created") && refs.some(e => e.event === "host_connected") && refs.some(e => e.event === "host_disconnected"),
+    "anonymous room reference connects creation, reconnect, disconnect and closure events");
+  const logged = JSON.stringify(refs);
+  ok(!logged.includes(rm.code) && !logged.includes(rm.hostToken) && !logged.includes(shared["CF-Connecting-IP"]) && !logged.includes("private-close-detail"),
+    "connection logs omit room codes, host secrets, IPs and raw close text");
+}
 
 let creates = 0;
 for (let i = 0; i < 25; i++) {
@@ -728,5 +792,10 @@ ok(codes.size > 1900 && [...codes].every((c) => !/[01OIL]/.test(c)), `codes are 
   globalThis.fetch = realFetch;
 }
 
+const allowedLogFields = new Set(["event", "roomRef", "roomAgeMs", "reason", "role", "status", "reconnect", "recoveryMs",
+  "sharedIpBlockBypassed", "cause", "closeCode", "clean", "connectedMs", "lastPingAgeMs", "graceMs", "hostMissingMs", "hostConnected", "viewers"]);
+ok(connectionEvents.every(e => Object.keys(e).every(k => allowedLogFields.has(k))), "all custom connection logs use a restricted field set");
+ok(connectionEvents.some(e => e.event === "room_connection_refused" && e.reason === "too_many_attempts") &&
+  connectionEvents.some(e => e.event === "room_connection_refused" && e.reason === "not_host"), "connection refusals record the server reason");
 console.log(failures ? `\n${failures} check(s) failed` : "\nAll checks passed");
 process.exit(failures ? 1 : 0);

@@ -2,6 +2,15 @@ name = "boxxie-share-server"
 main = "src/index.js"
 compatibility_date = "2025-09-01"
 
+# Free Workers Logs. Keep connection events, not credential-bearing request URLs.
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = true
+invocation_logs = false
+
 # Durable Objects on the Workers FREE plan must use SQLite storage.
 [[durable_objects.bindings]]
 name = "ROOM"

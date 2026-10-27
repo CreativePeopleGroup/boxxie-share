@@ -249,7 +249,12 @@ export default {
     }
 
     const isSocket = (request.headers.get("Upgrade") || "").toLowerCase() === "websocket";
-    const refuse = (error, status) => (isSocket ? refuseSocket(error) : json({ error }, status, request, env));
+    const refuse = (error, status) => {
+      // Never log the request URL: WebSocket queries contain tickets and host secrets.
+      if (isSocket) console.info({ event: "room_connection_refused", reason: error,
+        role: ["host", "viewer", "companion"].includes(url.searchParams.get("role")) ? url.searchParams.get("role") : "viewer", status });
+      return isSocket ? refuseSocket(error) : json({ error }, status, request, env);
+    };
 
     const ip = clientIp(request);
     const limiter = env.LIMITER.get(env.LIMITER.idFromName(ip));
@@ -319,7 +324,9 @@ export default {
     const m = url.pathname.match(/^\/api\/rooms\/([^/]+)\/ws$/);
     if (m) {
       if (!isSocket) return json({ error: "websocket_required" }, 426, request, env);
-      if (await limiter.blocked("joinfail", JOIN_FAILS_ALLOWED, JOIN_FAIL_WINDOW_MS)) {
+      const isHost = url.searchParams.get("role") === "host";
+      const joinBlocked = await limiter.blocked("joinfail", JOIN_FAILS_ALLOWED, JOIN_FAIL_WINDOW_MS);
+      if (joinBlocked && !isHost) {
         return refuse("too_many_attempts", 429);
       }
       // Everyone must be signed in: the app swaps its session for a one-use 60-second ticket.
@@ -327,12 +334,14 @@ export default {
       if (!who) return refuse("signed_out", 401);
       const code = normaliseCode(decodeURIComponent(m[1]));
       if (!code) {
+        if (joinBlocked) return refuse("too_many_attempts", 429);
         await limiter.hit("joinfail", JOIN_FAILS_ALLOWED, JOIN_FAIL_WINDOW_MS);
         return refuse("room_not_found", 404);
       }
       const room = env.ROOM.get(env.ROOM.idFromName(code));
       const exists = await room.isOpen();
       if (!exists) {
+        if (joinBlocked) return refuse("too_many_attempts", 429);
         await limiter.hit("joinfail", JOIN_FAILS_ALLOWED, JOIN_FAIL_WINDOW_MS);
         return refuse("room_not_found", 404);
       }
@@ -354,6 +363,7 @@ export default {
       if (url.searchParams.get("role") === "host") {
         const tokenOk = await room.checkHost(await sha256(url.searchParams.get("token") || ""), who.id);
         if (!tokenOk) {
+          if (joinBlocked) return refuse("too_many_attempts", 429);
           await limiter.hit("joinfail", JOIN_FAILS_ALLOWED, JOIN_FAIL_WINDOW_MS);
           return refuse("not_host", 403);
         }
@@ -361,6 +371,8 @@ export default {
       // Pass the signed-in person to the room. Set here by the Worker only, never by the browser.
       const h = new Headers(request.headers);
       h.set("X-Boxxie-User", JSON.stringify(who));
+      // Overwrite any caller-supplied value; only the verified host can reach this bypass.
+      h.set("X-Boxxie-Host-Recovery", isHost && joinBlocked ? "1" : "0");
       return room.fetch(new Request(request, { headers: h }));
     }
 
@@ -412,6 +424,7 @@ export class Room extends DurableObject {
     if (existing) return false; // code collision → caller picks another
     const meta = {
       code,
+      logRef: randomId(), // diagnostic correlation only; never the join code or account ID
       hostHash,
       maxViewers,
       hostName,
@@ -424,12 +437,23 @@ export class Room extends DurableObject {
     };
     await this.ctx.storage.put("meta", meta);
     await this.ctx.storage.setAlarm(meta.expiresAt);
+    this._log(meta, "room_created");
     return true;
+  }
+
+  _log(meta, event, fields = {}) {
+    console.info({ event, roomRef: meta.logRef || this.ctx.id?.toString() || "legacy",
+      roomAgeMs: Math.max(0, Date.now() - meta.createdAt), ...fields });
   }
 
   async _meta() {
     const meta = await this.ctx.storage.get("meta");
     if (!meta || meta.closed || Date.now() > meta.expiresAt) return null;
+    if (!this.runtimeLogged) {
+      this.runtimeLogged = true;
+      // A new runtime can be normal hibernation/deployment, not necessarily an error.
+      this._log(meta, "room_runtime_loaded", { hostConnected: !!this._host() });
+    }
     return meta;
   }
 
@@ -596,7 +620,11 @@ export class Room extends DurableObject {
         } catch {}
       }
       this.ctx.acceptWebSocket(server);
-      server.serializeAttachment({ id: "host", role: "host", name: meta.hostName, state: "approved", userId: who && who.id, photo: who && who.photo });
+      server.serializeAttachment({ id: "host", role: "host", name: meta.hostName, state: "approved", userId: who && who.id, photo: who && who.photo,
+        connectedAt: Date.now(), lastMessageAt: Date.now() });
+      this._log(meta, "host_connected", { reconnect: !!meta.hostGoneAt || !!old,
+        recoveryMs: meta.hostGoneAt ? Math.max(0, Date.now() - meta.hostGoneAt) : 0,
+        sharedIpBlockBypassed: request.headers.get("X-Boxxie-Host-Recovery") === "1" });
       if (meta.hostGoneAt) {
         delete meta.hostGoneAt;
         await this.ctx.storage.put("meta", meta);
@@ -700,7 +728,11 @@ export class Room extends DurableObject {
     }
     const a = ws.deserializeAttachment() || {};
 
-    if (msg.type === "ping") return this._send(ws, { type: "pong" });
+    if (msg.type === "ping") {
+      // Stored in the socket attachment, not a database write or a log on every ping.
+      if (a.role === "host") ws.serializeAttachment({ ...a, lastMessageAt: Date.now() });
+      return this._send(ws, { type: "pong" });
+    }
 
     // Host or an approved watcher (not a paired phone) asks for a pairing code for their phone.
     if (msg.type === "companion-code" && (a.role === "host" || (a.role === "viewer" && a.state === "approved" && !a.companionOf))) {
@@ -820,18 +852,24 @@ export class Room extends DurableObject {
     for (const v of this._approved()) this._send(v.ws, msg);
   }
 
-  async webSocketClose(ws) {
-    await this._left(ws);
+  async webSocketClose(ws, code, reason, wasClean) {
+    await this._left(ws, { cause: "close", closeCode: Number.isInteger(code) ? code : null, clean: !!wasClean });
   }
   async webSocketError(ws) {
-    await this._left(ws);
+    await this._left(ws, { cause: "error" });
   }
 
-  async _left(ws) {
+  async _left(ws, details) {
     const a = ws.deserializeAttachment() || {};
     const meta = await this.ctx.storage.get("meta");
     if (!meta || meta.closed) return;
     if (a.role === "host") {
+      // An error followed by close must not restart the grace period or log twice.
+      ws.serializeAttachment({ ...a, role: "gone" });
+      this._log(meta, "host_disconnected", { ...details,
+        connectedMs: a.connectedAt ? Math.max(0, Date.now() - a.connectedAt) : null,
+        lastPingAgeMs: a.lastMessageAt ? Math.max(0, Date.now() - a.lastMessageAt) : null,
+        graceMs: HOST_GRACE_MS });
       // Give the host a few minutes to reconnect (e.g. TV Wi-Fi blip).
       meta.hostGoneAt = Date.now();
       await this.ctx.storage.put("meta", meta);
@@ -878,6 +916,11 @@ export class Room extends DurableObject {
   }
 
   async _close(reason) {
+    const meta = await this.ctx.storage.get("meta");
+    if (!meta || meta.closed) return;
+    this._log(meta, "room_closed", { reason,
+      hostMissingMs: meta.hostGoneAt ? Math.max(0, Date.now() - meta.hostGoneAt) : 0,
+      hostConnected: !!this._host(), viewers: this._watchers().length });
     for (const s of this._sockets()) {
       this._send(s.ws, { type: "room-closed", reason });
       try {
@@ -885,7 +928,6 @@ export class Room extends DurableObject {
       } catch {}
     }
     // Keep a tombstone until expiry so the code can't be reused by someone else.
-    const meta = await this.ctx.storage.get("meta");
     await this.ctx.storage.deleteAll();
     if (meta && Date.now() < meta.expiresAt) {
       await this.ctx.storage.put("meta", { code: meta.code, closed: true, expiresAt: meta.expiresAt });
