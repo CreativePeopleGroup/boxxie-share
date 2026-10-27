@@ -50,6 +50,15 @@ async function signedInPage(browser, name, options = {}) {
     });
     const NativePeer = window.RTCPeerConnection;
     window.__audioTestPeers = [];
+    window.__readMediaStats = peer => new Promise(resolve => {
+      let done = false;
+      const finish = value => { if (!done) { done = true; clearInterval(watch); clearTimeout(limit); resolve(value); } };
+      // A peer can close between the state check and getStats completing.
+      // Still require received energy/frames, but don't wait forever on a retired negotiation.
+      const watch = setInterval(() => { if (peer.signalingState === 'closed') finish(null); }, 50);
+      const limit = setTimeout(() => finish(null), 2000);
+      peer.getStats().then(finish, () => finish(null));
+    });
     window.RTCPeerConnection = new Proxy(NativePeer, {
       // Both browsers run on this machine: use local ICE, independent of public
       // STUN/TURN availability. Cross-network relay coverage needs a separate test.
@@ -76,7 +85,8 @@ async function receiving(page) {
       // Call peers and retired negotiations do not carry the film. In Firefox
       // an unrelated/empty peer's getStats can remain pending after recovery.
       if (peer.signalingState === 'closed' || !peer.getReceivers().some(r => r.track && tracks.has(r.track.id))) continue;
-      const stats = await peer.getStats();
+      const stats = await window.__readMediaStats(peer);
+      if (!stats) continue;
       for (const r of stats.values()) {
         if (r.type === 'inbound-rtp' && (r.kind || r.mediaType) === 'audio' && r.bytesReceived > 0 &&
             (r.totalAudioEnergy > 0 || r.audioLevel > 0)) return true;
@@ -98,7 +108,7 @@ async function receiving(page) {
     details: document.getElementById('screen-diag').textContent,
     peers: await Promise.all(window.__audioTestPeers.filter(p => p.signalingState !== 'closed').map(async p => ({
       state: p.connectionState, ice: p.iceConnectionState, signal: p.signalingState,
-      stats: [...(await p.getStats()).values()].filter(r => ['inbound-rtp', 'candidate-pair'].includes(r.type)),
+      stats: [...((await window.__readMediaStats(p)) || new Map()).values()].filter(r => ['inbound-rtp', 'candidate-pair'].includes(r.type)),
     }))),
   })), 'read failed receive diagnostics'));
   assert(received, `${engine}: receive rendered video and audio energy within 30 seconds`);
@@ -111,7 +121,9 @@ async function mediaProgress(page) {
     const tracks = new Set((document.getElementById('film').srcObject?.getTracks() || []).filter(t => t.readyState === 'live').map(t => t.id));
     for (const peer of window.__audioTestPeers) {
       if (peer.signalingState === 'closed' || !peer.getReceivers().some(r => r.track && tracks.has(r.track.id))) continue;
-      for (const r of (await peer.getStats()).values()) {
+      const stats = await window.__readMediaStats(peer);
+      if (!stats) continue;
+      for (const r of stats.values()) {
         if (r.type !== 'inbound-rtp') continue;
         frames += r.framesDecoded || 0;
         energy += r.totalAudioEnergy || 0;

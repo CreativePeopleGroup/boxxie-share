@@ -1501,6 +1501,7 @@
 
   // Viewer: the app's screen arrives on its own connection
   const screenPeers = new Map();
+  let sawHostScreen = false;
   const screenRestartAt = new Map();
   function restartScreenPeer(sp) {
     if (screenPeers.get(sp.from) !== sp || S.role !== "viewer" || S.closing ||
@@ -1637,6 +1638,7 @@
     }
   }
   function screenSignal(from, data) {
+    if (from === "host") sawHostScreen = true;
     let sp = screenPeers.get(from);
     // Older APKs reused their capture session ID for a replacement native peer.
     // SDP's origin session ID distinguishes that from an offer on the same peer.
@@ -2059,6 +2061,9 @@
         connectionNotice("");
         banner("");
         resetPeer("host");
+        // A repair request sent while the host was offline cannot reach it.
+        // Retry once the signalling path returns, without disturbing a healthy picture.
+        if (sawHostScreen && !screenPeers.has("host")) send({ type: "signal", to: "host", data: { ch: "screen", restart: true } });
         return;
       case "ending":
         showEnding(m.in, m.why);
@@ -3302,6 +3307,7 @@
   };
 
   function cleanup() {
+    sawHostScreen = false;
     connectionNotice("");
     clearInterval(roomClockTimer);
     roomClockTimer = null;

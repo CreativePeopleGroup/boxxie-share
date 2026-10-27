@@ -66,6 +66,19 @@ async function receiving(viewer) {
     await host.waitForFunction(() => !document.getElementById('connection-notice-text').textContent);
     await receiving(viewer);
     assert.equal(await host.evaluate(() => window.__nativeRoomStarts),1,'Native retry does not restart the browser connection loop');
+    assert.equal(await host.evaluate(() => window.__nativeCalls.filter(c => c.startsWith('add:')).length),1,'Healthy native media peer survives the signalling reconnect');
+    await host.evaluate(() => window.__nativeRoomWire.close());
+    await viewer.locator('#connection-notice').waitFor({state:'visible'});
+    await viewer.evaluate(() => {
+      const track = document.getElementById('film').srcObject.getVideoTracks()[0];
+      const peer = window.__mediaPeers.find(p => p.signalingState !== 'closed' && p.getReceivers().some(r => r.track?.id === track.id));
+      Object.defineProperty(peer,'iceConnectionState',{configurable:true,value:'failed'});
+      peer.dispatchEvent(new Event('iceconnectionstatechange'));
+    });
+    await host.waitForFunction(() => !document.getElementById('connection-notice-text').textContent);
+    await receiving(viewer);
+    assert.equal(await host.evaluate(() => window.__nativeCalls.filter(c => c.startsWith('add:')).length),2,
+      'A screen repair request lost during host absence is retried when the host returns');
     // Drop delivery of room events to the app page. The native stand-in must
     // negotiate a refreshed approved viewer directly through its transport.
     await host.evaluate(() => {

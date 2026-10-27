@@ -156,17 +156,17 @@ public final class ScreenShareEngine {
                     !c.getString("server").replaceAll("/+$", "").equals(BuildConfig.SERVER_URL.replaceAll("/+$", ""))) return false;
             String id = c.getString("id"), code = c.getString("code"), secret = c.getString("hostToken"), bearer = c.getString("sessionToken");
             if (id.isEmpty() || id.length() > 100 || !code.matches("[A-Z2-9]{8}") ||
-                    !secret.matches("[0-9a-fA-F]{64}") || bearer.length() < 20 || bearer.length() > 1024) return false;
+                    !secret.matches("[0-9a-fA-F]{64}") || !bearer.matches("[0-9a-fA-F]{64}")) return false;
             roomConnectionId = id;
             roomConnection.start(id, code, secret, bearer);
             return true;
         } catch (Exception ignored) { return false; }
     }
     public void sendRoom(String id, String json) {
-        if (id.equals(roomConnectionId) && json != null && json.length() <= 65536) roomConnection.send(id, json);
+        if (roomConnectionId.equals(id) && json != null && json.length() <= 65536) roomConnection.send(id, json);
     }
     public void disconnectRoom(String id) {
-        if (!id.equals(roomConnectionId)) return;
+        if (!roomConnectionId.equals(id)) return;
         roomConnectionId = "";
         roomConnection.stop(id);
     }
@@ -175,7 +175,10 @@ public final class ScreenShareEngine {
     private void handleRoomMessage(JSONObject m) {
         try {
             String type = m.optString("type");
-            if (type.equals("welcome")) setIce(m.optJSONArray("iceServers") == null ? new JSONArray() : m.getJSONArray("iceServers"));
+            if (type.equals("welcome")) {
+                setIce(m.optJSONArray("iceServers") == null ? new JSONArray() : m.getJSONArray("iceServers"));
+                roomRestartAt.clear();
+            }
             else if (type.equals("viewer-ready") && m.isNull("companionOf")) {
                 String id = m.getString("id");
                 Viewer v = viewers.get(id);
