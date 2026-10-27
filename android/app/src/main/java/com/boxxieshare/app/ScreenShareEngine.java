@@ -103,6 +103,8 @@ public final class ScreenShareEngine {
     private static final class Viewer {
         PeerConnection pc;
         RtpSender videoSender;
+        int displayHeight;
+        String codec = "";
         boolean vp8BudgetApplied;
         boolean remoteSet;
         boolean vp8;            // switched to VP8 because the H.264 encoder produced no picture
@@ -593,7 +595,7 @@ public final class ScreenShareEngine {
                     new RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY, streams));
             v.videoSender = vt.getSender();
             v.vp8BudgetApplied = vp8;
-            limitBitrate(v.videoSender, vp8, "");
+            limitBitrate(v, vp8, "");
             pc.createOffer(new SdpAdapter() {
                 @Override
                 public void onCreateSuccess(SessionDescription sdp) {
@@ -678,7 +680,7 @@ public final class ScreenShareEngine {
         if (automaticQuality && !v.vp8BudgetApplied && "VP8".equalsIgnoreCase(codec)) {
             // Some viewers negotiate VP8 directly, without our H.264 fallback.
             // Apply the budget from the actual codec rather than the offer preference.
-            limitBitrate(v.videoSender, false, codec);
+            limitBitrate(v, false, codec);
             v.vp8BudgetApplied = true;
         }
         boolean connected = "connected".equals(v.ice) || "completed".equals(v.ice);
@@ -701,17 +703,21 @@ public final class ScreenShareEngine {
         }
     }
 
-    private void limitBitrate(RtpSender sender, boolean vp8, String codec) {
+    private void limitBitrate(Viewer v, boolean vp8, String codec) {
         try {
+            RtpSender sender = v.videoSender;
+            if (sender == null) return;
+            v.codec = codec;
             RtpParameters p = sender.getParameters();
-            VideoQualityProfile profile = VideoQualityProfile.forCodec(automaticQuality, maxHeight, maxBitrate, vp8, codec);
+            VideoQualityProfile profile = VideoQualityProfile.forReceiver(automaticQuality,
+                    maxHeight, maxBitrate, vp8, codec, v.displayHeight);
             p.degradationPreference = automaticQuality
                     ? RtpParameters.DegradationPreference.MAINTAIN_FRAMERATE
                     : RtpParameters.DegradationPreference.BALANCED;
             for (RtpParameters.Encoding e : p.encodings) {
                 e.maxBitrateBps = profile.bitrate;
                 e.maxFramerate = profile.fps;
-                if (captureHeight > profile.height) e.scaleResolutionDownBy = captureHeight / (double) profile.height;
+                e.scaleResolutionDownBy = Math.max(1.0, captureHeight / (double) profile.height);
             }
             if (!sender.setParameters(p)) {
                 // Retain bitrate/frame caps if an encoder rejects a resource preference.
@@ -734,6 +740,10 @@ public final class ScreenShareEngine {
             try {
                 JSONObject d = new JSONObject(json);
                 if (d.has("session") && !d.optString("session").equals(v.sess)) return;
+                if (d.has("displayHeight")) {
+                    v.displayHeight = d.optInt("displayHeight", 720) >= 1080 ? 1080 : 720;
+                    limitBitrate(v, v.vp8, v.codec);
+                }
                 if (d.has("sdp")) {
                     JSONObject s = d.getJSONObject("sdp");
                     if (!"answer".equals(s.optString("type"))) return;

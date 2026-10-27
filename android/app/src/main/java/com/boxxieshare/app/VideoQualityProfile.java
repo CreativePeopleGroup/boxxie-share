@@ -5,6 +5,15 @@ final class VideoQualityProfile {
     final boolean automatic;
     final int height, bitrate, fps;
 
+    static VideoQualityProfile forReceiver(boolean automatic, int height, int bitrate,
+            boolean forcedVP8, String codec, int displayHeight) {
+        if (automatic) {
+            height = Math.min(height, displayHeight <= 0 || displayHeight >= 1080 ? 1080 : 720);
+            bitrate = Math.min(bitrate, displayHeight >= 1080 ? 8_000_000 : 4_000_000);
+        }
+        return forCodec(automatic, height, bitrate, forcedVP8, codec);
+    }
+
     static VideoQualityProfile forCodec(boolean automatic, int height, int bitrate, boolean forcedVP8, String codec) {
         return new VideoQualityProfile(automatic, height, bitrate,
                 forcedVP8 || (automatic && "VP8".equalsIgnoreCase(codec)));
@@ -16,7 +25,7 @@ final class VideoQualityProfile {
         int b = requestedBitrate > 0 ? requestedBitrate : automatic ? 4_000_000 : 8_000_000;
         if (automatic) {
             h = Math.min(h, 1080);
-            b = Math.min(b, 4_000_000);
+            b = Math.min(b, 8_000_000);
         }
         // Keep the existing conservative fallback for sticks encoding VP8.
         height = vp8 ? Math.min(h, 720) : h;

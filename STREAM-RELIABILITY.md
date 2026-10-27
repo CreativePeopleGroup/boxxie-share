@@ -3,12 +3,27 @@
 ## What Auto does
 
 Auto guides WebRTC's existing congestion/resource adaptation rather than adding a
-competing fixed-interval rate controller. Its ceiling is 1080p and 4 Mbps of video
-per viewer. Both Android and browser senders prefer reducing resolution to retain
+competing fixed-interval rate controller. Its ceiling is 1080p and 8 Mbps of video
+per viewer on larger displays. Smaller screens request 720p and up to 4 Mbps.
+The viewer's screen/viewport dimensions provide a display-size heuristic, not a
+benchmark of decoder capacity. Each approved viewer sends their own bounded
+request through the existing encrypted signalling connection. Manual host quality
+still wins. Both Android and browser senders prefer reducing resolution to retain
 motion when WebRTC detects resource pressure. The existing conservative VP8
 fallback stays capped at 720p, 24 fps and 2.5 Mbps. These are upper limits, not
 promised throughput, frame rates or upload requirements; audio and transport add
 overhead. Manual quality modes remain available.
+
+Viewers can select **Watching on → TV / AirPlay** to request the larger-display
+budget, including when browser screen mirroring does not expose the destination
+resolution. Safari's wireless-playback event also requests that budget when
+available; it does not guarantee AirPlay support for a WebRTC stream. The explicit
+choice is saved locally. No upscaling invents extra source detail, no 4K is selected
+automatically, and VP8's conservative stick fallback remains unchanged. Higher
+ceilings can increase host upload and relay usage. Real AirPlay and stick testing
+remain necessary. WebRTC's negotiated codec and built-in congestion/resource
+adaptation handle decoder/encoder and network limits; this is not a custom
+hardware capability benchmark or a guaranteed quality-recovery schedule.
 
 Auto is the default when the Android bridge advertises support, or for a browser
 host. Older installed Android apps retain HD as their default and hide Auto until

@@ -61,6 +61,41 @@ body {
 }
 .tv body { font-size: 20px; }
 
+/* A separate opaque layer keeps startup sizing out of sight without changing
+   the underlying layout measurements or inherited visibility in WebKit. */
+.startup {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  padding: 32px;
+  background: #0b1118;
+}
+.startup img { width: min(320px, 70vw); height: auto; }
+.startup-label { color: var(--muted); font-size: 16px; }
+.viewer-display { display: flex; align-items: center; gap: 8px; margin-left: auto; font-size: 14px; }
+.viewer-display select { width: auto; min-height: 44px; max-width: 190px; }
+#viewer-controls { flex-wrap: wrap; gap: 8px; }
+@media (max-width: 600px) {
+  .viewer-display { flex-basis: 100%; margin-left: 0; justify-content: space-between; }
+}
+.startup-progress {
+  width: 120px;
+  height: 4px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--teal), var(--sand), var(--teal));
+  background-size: 200% 100%;
+  animation: startup-progress 1.5s linear infinite;
+}
+@keyframes startup-progress { to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .startup-progress { animation: none; }
+}
+
 h1, h2, h3 { line-height: 1.12; margin: 0; font-family: var(--display); letter-spacing: -0.02em; }
 h2 { font-size: 1.4rem; font-weight: 700; }
 h3 { font-size: 1.05rem; font-weight: 700; letter-spacing: -0.01em; }
