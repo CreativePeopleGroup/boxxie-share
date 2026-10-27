@@ -35,7 +35,9 @@ public class NativeRoomConnectionTest {
     private static final class Backend extends Dispatcher {
         final AtomicInteger tickets = new AtomicInteger(), sockets = new AtomicInteger(), pings = new AtomicInteger();
         final AtomicReference<WebSocket> socket = new AtomicReference<>();
+        final BlockingQueue<String> sent = new LinkedBlockingQueue<>();
         volatile int ticketStatus = 200;
+        volatile boolean replyToPing = true;
         @Override public MockResponse dispatch(RecordedRequest r) {
             if (r.getPath().equals("/api/ticket")) {
                 tickets.incrementAndGet();
@@ -52,7 +54,8 @@ public class NativeRoomConnectionTest {
                         ws.send("{\"type\":\"roster\",\"viewers\":[],\"pending\":[]}");
                     }
                     @Override public void onMessage(WebSocket ws, String text) {
-                        if (text.equals("{\"type\":\"ping\"}")) { pings.incrementAndGet(); ws.send("{\"type\":\"pong\"}"); }
+                        if (text.equals("{\"type\":\"ping\"}")) { pings.incrementAndGet(); if (replyToPing) ws.send("{\"type\":\"pong\"}"); }
+                        else sent.add(text);
                     }
                     @Override public void onClosing(WebSocket ws, int code, String reason) { ws.close(code, ""); }
                 });
@@ -82,7 +85,9 @@ public class NativeRoomConnectionTest {
                 room.stop("first"); // A stale page cannot stop its replacement.
                 await(events.messages, "recreated-page:pong");
                 assertEquals(2, backend.sockets.get());
+                room.send("recreated-page", "{\"type\":\"end\"}");
                 room.stop("recreated-page");
+                assertEquals("{\"type\":\"end\"}", backend.sent.poll(3, TimeUnit.SECONDS));
                 Thread.sleep(180);
                 assertEquals(2, backend.tickets.get());
             } finally { room.dispose(); }
@@ -133,6 +138,22 @@ public class NativeRoomConnectionTest {
                 await(events.states, "owner:closed:4000:replaced");
                 Thread.sleep(150);
                 assertEquals(1, backend.tickets.get());
+            } finally { room.dispose(); }
+        }
+    }
+    @Test public void silentSocketIsDetectedWithoutACloseCallback() throws Exception {
+        Backend backend = new Backend(); backend.replyToPing = false; Events events = new Events();
+        try (MockWebServer server = new MockWebServer()) {
+            server.setDispatcher(backend); server.start();
+            NativeRoomConnection room = new NativeRoomConnection(server.url("/").toString(), "https://app.example", events, 20, 40);
+            try {
+                room.start("silent", "ABCDEFGH", SECRET, BEARER);
+                await(events.messages, "silent:welcome");
+                await(events.states, "silent:retrying:0:network");
+                backend.replyToPing = true;
+                await(events.messages, "silent:welcome");
+                await(events.messages, "silent:pong");
+                assertTrue(backend.tickets.get() >= 2);
             } finally { room.dispose(); }
         }
     }

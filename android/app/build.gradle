@@ -9,7 +9,7 @@ def versionLabel = (project.findProperty('versionName') ?: '1.0.0').toString()
 
 android {
     namespace 'com.boxxieshare.app'
-    compileSdk 36
+    compileSdk 37
 
     defaultConfig {
         applicationId 'com.boxxieshare.app'

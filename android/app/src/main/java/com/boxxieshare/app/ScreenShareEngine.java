@@ -181,6 +181,22 @@ public final class ScreenShareEngine {
                 Viewer v = viewers.get(id);
                 // Keep healthy media tracks during signalling recovery.
                 if (v == null || !(v.ice.equals("connected") || v.ice.equals("completed"))) connectViewer(id, false);
+            } else if (type.equals("roster")) {
+                // Reconcile after page recreation: a missed UI event must never
+                // leave a removed viewer receiving the native capture.
+                java.util.Set<String> approved = new java.util.HashSet<>();
+                JSONArray list = m.optJSONArray("viewers");
+                if (list != null) for (int i = 0; i < list.length(); i++) {
+                    JSONObject viewer = list.getJSONObject(i);
+                    if (!viewer.isNull("companionOf")) continue;
+                    String id = viewer.getString("id");
+                    approved.add(id);
+                    if (!viewers.containsKey(id)) connectViewer(id, false);
+                }
+                for (String id : new ArrayList<>(viewers.keySet())) if (!approved.contains(id)) {
+                    closeViewer(id, false);
+                    roomRestartAt.remove(id);
+                }
             } else if (type.equals("viewer-left")) {
                 String id = m.getString("id");
                 closeViewer(id, false);
