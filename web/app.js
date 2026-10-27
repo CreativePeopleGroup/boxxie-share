@@ -1713,6 +1713,7 @@
   // ----- Coming back after the phone locks or loses signal -----
   // The server lets people the host already let in straight back in, so this is seamless.
   function rejoinSoon() {
+    clearTimeout(hostAwayTimer);
     if (!S.rejoinSince) S.rejoinSince = Date.now();
     if (Date.now() - S.rejoinSince > 15 * 60 * 1000) {
       S.rejoinSince = null;
