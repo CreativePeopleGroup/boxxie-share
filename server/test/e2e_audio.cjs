@@ -71,8 +71,11 @@ async function receiving(page) {
     const video = document.getElementById('film');
     if (!video.srcObject || !video.videoWidth || video.currentTime < 0.3 ||
         !video.srcObject.getAudioTracks().some(t => t.readyState === 'live')) return false;
+    const tracks = new Set(video.srcObject.getTracks().filter(t => t.readyState === 'live').map(t => t.id));
     for (const peer of window.__audioTestPeers) {
-      if (peer.connectionState === 'closed') continue;
+      // Call peers and retired negotiations do not carry the film. In Firefox
+      // an unrelated/empty peer's getStats can remain pending after recovery.
+      if (peer.signalingState === 'closed' || !peer.getReceivers().some(r => r.track && tracks.has(r.track.id))) continue;
       const stats = await peer.getStats();
       for (const r of stats.values()) {
         if (r.type === 'inbound-rtp' && (r.kind || r.mediaType) === 'audio' && r.bytesReceived > 0 &&
@@ -93,7 +96,7 @@ async function receiving(page) {
     sockets: window.__testSockets.map(s => s.readyState),
     video: { width: document.getElementById('film').videoWidth, time: document.getElementById('film').currentTime },
     details: document.getElementById('screen-diag').textContent,
-    peers: await Promise.all(window.__audioTestPeers.map(async p => ({
+    peers: await Promise.all(window.__audioTestPeers.filter(p => p.signalingState !== 'closed').map(async p => ({
       state: p.connectionState, ice: p.iceConnectionState, signal: p.signalingState,
       stats: [...(await p.getStats()).values()].filter(r => ['inbound-rtp', 'candidate-pair'].includes(r.type)),
     }))),
@@ -105,8 +108,9 @@ async function receiving(page) {
 async function mediaProgress(page) {
   return bounded(page.evaluate(async () => {
     let frames = 0, energy = 0;
+    const tracks = new Set((document.getElementById('film').srcObject?.getTracks() || []).filter(t => t.readyState === 'live').map(t => t.id));
     for (const peer of window.__audioTestPeers) {
-      if (peer.connectionState === 'closed') continue;
+      if (peer.signalingState === 'closed' || !peer.getReceivers().some(r => r.track && tracks.has(r.track.id))) continue;
       for (const r of (await peer.getStats()).values()) {
         if (r.type !== 'inbound-rtp') continue;
         frames += r.framesDecoded || 0;
