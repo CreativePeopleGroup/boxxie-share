@@ -860,9 +860,10 @@ export class Room extends DurableObject {
   }
 
   async _left(ws, details) {
-    const a = ws.deserializeAttachment() || {};
     const meta = await this.ctx.storage.get("meta");
     if (!meta || meta.closed) return;
+    // Re-read after storage I/O: another close/error may have retired this socket.
+    const a = ws.deserializeAttachment() || {};
     if (a.role === "host") {
       // An error followed by close must not restart the grace period or log twice.
       ws.serializeAttachment({ ...a, role: "gone" });

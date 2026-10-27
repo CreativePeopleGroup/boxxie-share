@@ -358,7 +358,10 @@ ok(blockedAt !== null && blockedAt <= 10, `guessing codes is blocked after a few
   await h.next(type("pong"));
   const socket = object._host().ws;
   const before = connectionEvents.filter(e => e.event === "host_disconnected").length;
-  await object.webSocketError(socket);
+  await Promise.all([
+    object.webSocketError(socket),
+    object.webSocketClose(socket, 1006, "private-close-detail", false),
+  ]);
   const missingAt = (await object._ctx.storage.get("meta")).hostGoneAt;
   await object.webSocketClose(socket, 1006, "private-close-detail", false);
   const after = connectionEvents.filter(e => e.event === "host_disconnected");
