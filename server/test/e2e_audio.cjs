@@ -467,6 +467,7 @@ async function mediaProgress(page) {
       window.dispatchEvent(new Event('online'));
       Date.now = now;
     });
+    await host.waitForFunction(() => document.getElementById('banner').hidden);
     await viewer.waitForFunction(() => document.getElementById('banner').hidden);
     await receiving(viewer);
     assert.equal(await host.locator('#viewer-health li').count(),1,'Host stale-socket recovery preserves the viewer');
