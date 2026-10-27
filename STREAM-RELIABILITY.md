@@ -48,7 +48,7 @@ physical capture test provide that evidence.
 
 ## Simulated network validation
 
-The host's **Copy picture diagnostics** button exports selected device/version
+The host's **Picture & sound help → Copy picture details** button exports selected device/version
 metadata and numbered per-viewer resolution, fps, measured bitrate, target bitrate
 when available, codec/profile/encoder and selected route. Names, room codes, peer
 IDs, candidate addresses and raw stats are excluded. A readable report is shown
@@ -56,6 +56,16 @@ if the TV WebView has no clipboard. A network limitation is not attributed solel
 to host upload: the bottleneck may be elsewhere along the path. Reported codec
 profile and target bitrate are marked unknown when the engine does not expose
 them. No diagnostics are uploaded automatically.
+
+Host signalling retries temporary ticket-fetch errors and WebSocket construction
+or pre-open failures. Ticket requests time out after eight seconds. Wake/online
+events and a 15-second host watchdog detect stale sockets after 90 seconds without
+server messages, with retries capped at five-second intervals. Existing media
+tracks stay alive during ticket failures. This does not guarantee recovery if an
+OS suspends all page execution. Server closure/expiry, invalid host credentials,
+account expiry and a replacement host remain authoritative: a closed room is not
+silently recreated. The server's three-minute host grace period is unchanged.
+Viewer messages distinguish host-connection timeout from an explicit host End.
 
 The Chromium CI scenario uses a moving, complex synthetic picture and generated
 audio. Linux traffic control applies bandwidth limits, delay and packet loss to

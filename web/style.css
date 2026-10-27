@@ -883,7 +883,19 @@ textarea:focus { border-color: rgba(239, 203, 153, 0.6); outline: none; }
 }
 .health-col .sound-tests { display: grid; grid-template-columns: 1fr; gap: 8px; }
 .health-col .sound-tests button { width: 100%; min-height: 42px; margin: 0; display: inline-flex; align-items: center; justify-content: center; }
-#copy-diagnostics { width: 100%; min-height: 42px; display: inline-flex; align-items: center; justify-content: center; }
+#help-open, .picture-help > #copy-diagnostics, .picture-help .sound-tests button { width: 100%; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
+.picture-help .sound-tests { display: grid; gap: 8px; }
+.picture-help #help-close { min-height: 44px; min-width: 80px; justify-content: center; }
+.join-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; }
+.join-row .join-card { position: static; margin: 0; height: 100%; min-width: 0; border: 1px solid var(--hair); border-radius: 22px; background: var(--card); }
+.join-card-text { min-width: 0; }
+.join-row .join-addr { white-space: normal; overflow-wrap: anywhere; }
+.join-row .health-col { padding: 20px; border: 1px solid var(--hair); border-radius: 22px; background: var(--card); justify-content: space-between; min-width: 0; }
+.join-row .viewer-health, .tv .join-row .viewer-health { width: 100%; min-width: 0; margin: 0 0 12px; max-height: 180px; }
+.join-row .viewer-health li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 8px; align-items: center; }
+.health-person { min-width: 0; min-height: 44px; padding: 6px; justify-content: flex-start; text-align: left; overflow-wrap: anywhere; background: transparent; }
+.join-row .vh-right { min-width: 0; }
+@media (max-width: 860px) { html:not(.tv) .join-row { grid-template-columns: 1fr; } }
 .health-col .sound-tests button[hidden] { display: none; }
 #screen-controls { flex-wrap: wrap; }
 .screen-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; flex: 0 1 420px; min-width: 0; }
