@@ -2,6 +2,7 @@ node_modules/
 builds/
 .wrangler/
 .dev.vars
+/.local/
 android/.gradle/
 android/build/
 android/app/build/

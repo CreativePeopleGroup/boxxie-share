@@ -20,6 +20,11 @@ globalThis.Response = class extends BaseResponse {
 
 // ---- Durable Object plumbing ----
 class Storage {
+  transaction(fn) {
+    const task=(this.pending || Promise.resolve()).then(()=>fn(this));
+    this.pending=task.catch(()=>{});
+    return task;
+  }
   constructor(owner) {
     this.map = new Map();
     this.owner = owner;
@@ -827,10 +832,19 @@ ok(connectionEvents.some(e => e.event === "room_connection_refused" && e.reason 
   ok(read.status===200 && result.report.history[0].codec==='VP8','shared report code works without viewer sign-in or Origin');
   ok(!['Private Name','SECRET-ROOM','192.0.2.42'].some(secret=>text.includes(secret)),'server removes identifying and unknown fields before storage');
   ok(read.headers.get('Cache-Control')==='no-store','shared report is not cached');
+  ok((await call('/admin/diagnostics')).status===403,'ordinary signed-in users cannot list shared reports');
+  env.DIAGNOSTICS_READ_TOKEN='d'.repeat(64);
+  ok((await call('/admin/diagnostics',{headers:{Authorization:'Bearer wrong'}})).status===403,'wrong inbox credentials are refused');
+  const inboxRequest=()=>worker.fetch(new Request('https://server.test/admin/diagnostics',{
+    headers:{Authorization:'Bearer '+env.DIAGNOSTICS_READ_TOKEN}}),env);
+  const inboxResponse=await inboxRequest(), inboxBody=await inboxResponse.json();
+  ok(inboxResponse.status===200 && inboxBody.reports[0].code===shared.code,'read-only maintainer can retrieve the newest shared report without a user code');
+  ok(inboxResponse.headers.get('Cache-Control')==='no-store','protected report inbox is not cached');
   const store=env.ROOM.get('diagnostics-'+shared.code);
   const saved=await store._ctx.storage.get('picture-report');
   saved.expiresAt=Date.now()-1;await store._ctx.storage.put('picture-report',saved);
   ok((await call('/api/diagnostics/'+shared.code)).status===404,'expired report cannot be retrieved');
+  ok((await (await inboxRequest()).json()).reports.length===0,'expired reports are excluded from the inbox');
   await store.storePictureReport(saved);await store.alarm();
   ok(store._ctx.storage.map.size===0,'expiry alarm deletes stored diagnostic data');
   for(let i=0;i<4;i++) await upload();
@@ -840,6 +854,13 @@ ok(connectionEvents.some(e => e.event === "room_connection_refused" && e.reason 
   const budget=env.LIMITER.get('diagnostics-global');
   await budget._ctx.storage.put('upload',Array(50).fill(Date.now()));
   ok((await call('/api/diagnostics',{method:'POST',headers:auth2,body:JSON.stringify(body)})).status===429,'global report storage allowance stops new uploads at the limit');
+  const index=env.ROOM.get('diagnostics-index-test');
+  await Promise.all(Array.from({length:60},(_,i)=>index.indexPictureReport({code:String(i),expiresAt:Date.now()+60000})));
+  ok((await index.pictureReportIndex()).length===50,'concurrent inbox writes retain the bounded newest 50 entries');
+  const entries=await index.pictureReportIndex();
+  await index._ctx.storage.put('picture-index',entries.map(row=>({...row,expiresAt:Date.now()-1})));
+  await index.alarm();
+  ok(!await index._ctx.storage.get('picture-index'),'inbox expiry alarm removes report-code metadata');
 }
 console.log(failures ? `\n${failures} check(s) failed` : "\nAll checks passed");
 process.exit(failures ? 1 : 0);

@@ -90,6 +90,7 @@ jobs:
           S_EMAIL_API_KEY: ${{ secrets.BREVO_API_KEY }}
           S_EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
           S_ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+          S_DIAGNOSTICS_READ_TOKEN: ${{ secrets.DIAGNOSTICS_READ_TOKEN }}
           S_REPORT_EMAIL: ${{ secrets.REPORT_EMAIL }}
           S_REVIEW_EMAIL: ${{ secrets.REVIEW_EMAIL }}
           S_REVIEW_CODE: ${{ secrets.REVIEW_CODE }}
@@ -102,7 +103,7 @@ jobs:
         run: |
           if [ -n "$S_EMAIL_API_KEY" ]; then export S_EMAIL_PROVIDER=brevo; fi
           set_count=0
-          for n in EMAIL_PROVIDER EMAIL_API_KEY EMAIL_FROM ADMIN_TOKEN REPORT_EMAIL REVIEW_EMAIL REVIEW_CODE GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET FACEBOOK_APP_ID FACEBOOK_APP_SECRET TURN_KEY_ID TURN_KEY_API_TOKEN; do
+          for n in EMAIL_PROVIDER EMAIL_API_KEY EMAIL_FROM ADMIN_TOKEN DIAGNOSTICS_READ_TOKEN REPORT_EMAIL REVIEW_EMAIL REVIEW_CODE GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET FACEBOOK_APP_ID FACEBOOK_APP_SECRET TURN_KEY_ID TURN_KEY_API_TOKEN; do
             v="$(printenv "S_$n" || true)"
             [ -z "$v" ] && continue
             printf '%s' "$v" | npx --yes wrangler@4 secret put "$n" > /dev/null
