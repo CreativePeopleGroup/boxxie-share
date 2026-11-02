@@ -4,7 +4,7 @@ const { readFileSync } = require('node:fs');
 const assert = require('node:assert/strict');
 const BASE = process.env.BASE || 'http://127.0.0.1:8788/';
 async function page(browser, name, native) {
-  const ip = native ? '10.91.0.1' : '10.91.0.2';
+  const ip = native ? '10.91.0.1' : `10.91.1.${1 + Math.floor(Math.random()*240)}`;
   const response = await fetch(BASE + 'auth/code/create', {method:'POST',headers:{'Content-Type':'application/json','X-Test-IP':ip},body:JSON.stringify({name})});
   const session = await response.json();
   assert(session.token);
@@ -83,6 +83,7 @@ async function receiving(viewer) {
     // negotiate a refreshed approved viewer directly through its transport.
     await host.evaluate(() => {
       const dispatch = window.boxxieNativeEvent;
+      window.__savedNativeEvent = dispatch;
       window.boxxieNativeEvent = json => {
         const event = typeof json === 'string' ? JSON.parse(json) : json;
         if (!['room-state','room-message'].includes(event.type)) dispatch(json);
@@ -95,6 +96,30 @@ async function receiving(viewer) {
     assert.equal(await host.locator('#request-list .allow').count(),0,'Approved viewer rejoins without another approval');
     assert.equal(await host.evaluate(() => window.__nativeRoomStarts),1);
     assert((await viewer.locator('#room-duration').textContent()).startsWith('Open '));
+    // Resume page event delivery for admitting additional viewers. Media is
+    // generated in Chromium; this measures wiring, not a stick's encoder capacity.
+    await host.evaluate(() => { window.boxxieNativeEvent=window.__savedNativeEvent; });
+    const audience=[viewer];
+    for(let i=0;i<2;i++) {
+      const next=await page(browser,`Quality viewer ${i+1}`,false);
+      await next.locator('#join-code').fill(code);
+      await next.locator('#join-start').click();
+      await host.locator('#request-list .allow').click();
+      await receiving(next);
+      audience.push(next);
+    }
+    const progress=async page=>page.evaluate(()=>{
+      const video=document.getElementById('film');
+      return {time:video.currentTime,tracks:video.srcObject.getTracks().map(t=>t.id)};
+    });
+    const before=await Promise.all(audience.map(progress));
+    await new Promise(resolve=>setTimeout(resolve,5000));
+    const after=await Promise.all(audience.map(progress));
+    after.forEach((value,i)=>{
+      assert(value.time>before[i].time+1,'Each of three viewers continues playback');
+      assert.deepEqual(value.tracks,before[i].tracks,'Adding viewers retains existing tracks');
+    });
+    console.log('PASS three generated-media viewers progress without track replacement; physical encoder capacity not tested');
     console.log('PASS native-room bridge routes generated picture/audio, retries without a browser loop, dismisses notice, and negotiates viewer rejoin while app room-event delivery is suppressed');
   } finally {
     await Promise.race([browser.close(),new Promise((_,reject)=>setTimeout(()=>reject(new Error('Browser shutdown timeout')),10000))]);
