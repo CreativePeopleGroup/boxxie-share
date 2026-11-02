@@ -1,6 +1,13 @@
 const assert = require('node:assert/strict');
 const policy = require('../../web/quality-policy.js');
 const auto = { automatic: true, height: 1080, maxBitrate: 8_000_000 };
+// iOS can retain portrait screen dimensions while its viewport rotates.
+for (const [width,height] of [[390,844],[844,390],[844,320],[390,600]]) {
+  assert.equal(policy.receiverHeight({screenWidth:390,screenHeight:844,width,height}),720);
+}
+assert.equal(policy.receiverHeight({screenWidth:844,screenHeight:390,width:390,height:844}),720);
+assert.equal(policy.receiverHeight({width:820,height:1180}),1080);
+assert.equal(policy.receiverHeight({screenWidth:390,screenHeight:844,mode:'tv'}),1080);
 assert.equal(policy.preference(auto,1080),'balanced');
 assert.equal(policy.preference(auto,720),'maintain-framerate');
 assert.equal(policy.preference({automatic:false},720),'balanced');

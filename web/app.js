@@ -2591,8 +2591,11 @@
       const pc = this.pc;
       try {
         if (S.role === "host" && !S.companionOf.has(this.id) && data.displayHeight !== undefined) {
-          this.displayHeight = data.displayHeight >= 1080 ? 1080 : 720;
-          applyViewerLimits(this);
+          const height = data.displayHeight >= 1080 ? 1080 : 720;
+          if (this.displayHeight !== height) {
+            this.displayHeight = height;
+            applyViewerLimits(this);
+          }
         }
         if (data.displayOnly) return;
         if (data.kinds) {
@@ -2842,9 +2845,9 @@
     return h >= 2000 ? "4K" : h >= 1400 ? "1440p" : h >= 1000 ? "1080p" : h >= 700 ? "720p" : h ? h + "p" : "";
   }
   function receiverDisplayHeight() {
-    return window.BoxxieQuality.displayHeight({
-      width: Math.max(innerWidth, screen.width || 0),
-      height: Math.max(innerHeight, screen.height || 0),
+    return window.BoxxieQuality.receiverHeight({
+      screenWidth: screen.width, screenHeight: screen.height,
+      width: innerWidth, height: innerHeight,
       tv: isTV, mode: $("viewer-display").value,
     });
   }
