@@ -30,4 +30,10 @@ assert.equal(historical.split('\n').filter(line=>line.includes(' UTC · Viewer')
 assert(historical.includes('640×360') && historical.includes('source 1920×1080'));
 assert(historical.includes('encoder busy'));
 assert(!historical.includes('Private Person') && !historical.includes('user-secret'));
+const shared=diag.shareable({version:'1.0.35',quality:'Auto 1080p',device:'Private Person',viewers:[{
+  name:'Private Person',ip:'192.0.2.10',encoder:'OMX.private-text',codec:'H264',width:640,height:360,
+}],history});
+assert.equal(shared.history.length,120);
+assert.equal(shared.viewers[0].encoder,'hardware/platform');
+for(const secret of ['Private Person','192.0.2.10','user-secret','OMX.private-text']) assert(!JSON.stringify(shared).includes(secret));
 console.log('PASS selected route, measured quality, encoder limits and report privacy');

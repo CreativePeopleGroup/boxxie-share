@@ -1193,20 +1193,37 @@
     }
     // Explicit exits avoid geometry differences between TV WebViews.
   });
-  function pictureReport() {
+  function pictureData() {
     const active = (S.roster || []).filter(v => !v.companionOf).map(v => health.get(v.id) || {});
     let history = pictureSamples;
     try {
       if (S.native && typeof NATIVE.pictureHistory === "function") history = JSON.parse(NATIVE.pictureHistory());
     } catch {}
-    return window.BoxxieDiagnostics.report({
+    return {
       version: APP ? APP.name : "web",
       device: NATIVE ? [nativeInfo.manufacturer, nativeInfo.model,
         `Android ${nativeInfo.androidVersion || nativeInfo.sdk || "unknown"}`,
         `WebView ${nativeInfo.webViewVersion || "unknown"}`].filter(Boolean).join(" · ") : "Web browser",
       quality: quality().label, viewers: active, history: Array.isArray(history) ? history : [],
-    });
+    };
   }
+  function pictureReport() { return window.BoxxieDiagnostics.report(pictureData()); }
+  $("share-diagnostics").onclick = async () => {
+    const button=$("share-diagnostics"), status=$("shared-diagnostics");
+    button.disabled=true;
+    status.hidden=false;
+    status.textContent="Sharing technical picture statistics…";
+    try {
+      const report=window.BoxxieDiagnostics.shareable(pictureData());
+      const result=await api("/api/diagnostics",{method:"POST",body:report});
+      if(!result.ok) {
+        status.textContent=result.status===429 ? "Report allowance reached. Try again tomorrow; sharing continues." : "Couldn't share the report. Check your connection and try again.";
+        return;
+      }
+      status.textContent=`Report code: ${result.data.code}. Paste this in our chat. Expires in 24 hours.`;
+      try {await navigator.clipboard.writeText(result.data.code);status.textContent+=" Code copied.";} catch {}
+    } finally {button.disabled=false;}
+  };
   $("copy-diagnostics").onclick = async () => {
     const report = pictureReport();
     try {
@@ -3377,6 +3394,8 @@
     S.pendingFriendInvite = null;
     $("diagnostics-report").hidden = true;
     $("diagnostics-pages").hidden = true;
+    $("shared-diagnostics").hidden = true;
+    $("shared-diagnostics").textContent = "";
     $("picture-help").hidden = true;
     clearTimeout(hostAwayTimer);
     screenRestartAt.clear();

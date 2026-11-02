@@ -3,6 +3,21 @@
 ((root) => {
   const clean = value => String(value || "unknown").replace(/[\r\n\t]/g, " ").slice(0, 160);
   const diagnostics = {
+    shareable(body) {
+      const one=h=>{
+        const row={};
+        for(const key of ['at','viewer','width','height','sourceWidth','sourceHeight','fps','mbps','targetBitrate'])
+          if(Number.isFinite(h[key])) row[key]=h[key];
+        row.codec=['H264','VP8','VP9','AV1','H265'].includes(h.codec) ? h.codec : 'unknown';
+        row.limit=['none','cpu','bandwidth','other'].includes(h.limit) ? h.limit : 'unknown';
+        row.route=['direct UDP','direct TCP','relay UDP','relay TCP','relay TLS'].includes(h.route) ? h.route : 'unknown';
+        row.encoder=h.encoder==='libvpx' ? 'libvpx' : /^(MediaCodec|OMX\.|c2\.)/i.test(String(h.encoder || '')) ? 'hardware/platform' : 'unknown';
+        return row;
+      };
+      return {version:/^1\.0\.\d{1,6}$/.test(body.version) ? body.version : 'web',
+        quality:['Auto 1080p','Smooth 720p','HD 1080p','4K Ultra HD'].includes(body.quality) ? body.quality : 'unknown',
+        viewers:body.viewers.slice(0,8).map(one),history:body.history.slice(-120).map(one)};
+    },
     route(report) {
       const rows = [...report.values()];
       const transport = rows.find(r => r.type === "transport" && r.selectedCandidatePairId);

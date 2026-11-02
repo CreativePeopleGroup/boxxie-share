@@ -331,13 +331,21 @@ async function mediaProgress(page) {
       Math.abs(pageButtons[0].top-pageButtons[1].top)<1 && pageButtons[0].height>=44,
       'Report paging buttons match size and alignment with full-size targets');
     await host.locator('#diagnostics-report').evaluate((field,value)=>{field.value=value;field.scrollTop=0;},originalReport);
+    await host.locator('#share-diagnostics').click();
+    await host.waitForFunction(()=>/Report code: [a-f0-9]{24}/.test(document.getElementById('shared-diagnostics').textContent));
+    const sharedCode=(await host.locator('#shared-diagnostics').textContent()).match(/[a-f0-9]{24}/)[0];
+    const sharedResponse=await fetch(BASE+'api/diagnostics/'+sharedCode);
+    assert.equal(sharedResponse.status,200,'Shared report is retrievable by code without signing in');
+    const sharedBody=await sharedResponse.text();
+    assert(!sharedBody.includes(code) && !sharedBody.includes('Audio host'),'Shared report excludes room code and account name');
+    assert(await host.locator('#screen-room').isVisible(),'Sharing diagnostics keeps playback in its room');
     await host.locator('#test-tv-capture').click();
     assert((await host.evaluate(() => window.__nativeCalls)).includes('tv-capture-test'),
       'TV sound capture control calls the Android bridge');
     console.log('PASS TV sound capture control reaches the native bridge (simulated)');
     async function checkButtonGroups() {
       const groups = await host.evaluate(() => [
-        ['test-sound', 'test-tv-capture', 'copy-diagnostics'], ['ctl-reshare', 'ctl-stopshare'],
+        ['test-sound', 'test-tv-capture', 'copy-diagnostics', 'share-diagnostics'], ['ctl-reshare', 'ctl-stopshare'],
         ['diagnostics-prev', 'diagnostics-next'],
       ].map(ids => ids.map(id => {
         const box = document.getElementById(id).getBoundingClientRect();

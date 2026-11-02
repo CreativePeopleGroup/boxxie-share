@@ -10,6 +10,7 @@
 
 import { DurableObject } from "cloudflare:workers";
 import { Directory, handleAccounts } from "./accounts.js";
+import { readPictureBody } from "./picture-reports.js";
 
 export { Directory };
 
@@ -262,7 +263,8 @@ export default {
 
     // Google/Facebook sign-in pages are opened directly by the browser (no Origin header);
     // they check the return address instead.
-    const browserNav = /^\/auth\/(google|facebook)\/(start|callback)$/.test(url.pathname) || url.pathname === "/dev/mail" || url.pathname === "/admin/ban";
+    const reportRead = request.method === "GET" && /^\/api\/diagnostics\/[a-f0-9]{24}$/.test(url.pathname);
+    const browserNav = reportRead || /^\/auth\/(google|facebook)\/(start|callback)$/.test(url.pathname) || url.pathname === "/dev/mail" || url.pathname === "/admin/ban";
     if (!browserNav && !originAllowed(request, env)) return refuse("origin_not_allowed", 403);
 
     const accounts = await handleAccounts(request, env, {
@@ -276,6 +278,27 @@ export default {
     if (accounts) return accounts;
 
     const bearer = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
+
+    // A report code is an unguessable, expiring read capability, independent of rooms.
+    if (reportRead) {
+      if (!await limiter.hit("diagnostics-read", 60, 60*60*1000)) return refuse("too_many_reports",429);
+      const code=url.pathname.split('/').pop();
+      const report=await env.ROOM.get(env.ROOM.idFromName("diagnostics-"+code)).readPictureReport();
+      return json(report || {error:"report_not_found"},report ? 200 : 404,request,env);
+    }
+    if(url.pathname === "/api/diagnostics" && request.method === "POST") {
+      const me=await dir.whoami(bearer);
+      if(!me) return refuse("signed_out",401);
+      const userLimit=env.LIMITER.get(env.LIMITER.idFromName("diagnostics-user-"+me.id));
+      if(!await userLimit.hit("upload",5,24*60*60*1000)) return refuse("too_many_reports",429);
+      const report=await readPictureBody(request);
+      if(!report) return refuse("invalid_report",400);
+      const budget=env.LIMITER.get(env.LIMITER.idFromName("diagnostics-global"));
+      if(!await budget.hit("upload",50,24*60*60*1000)) return refuse("report_capacity",429);
+      const code=randomToken(12), expiresAt=Date.now()+24*60*60*1000;
+      await env.ROOM.get(env.ROOM.idFromName("diagnostics-"+code)).storePictureReport({report,expiresAt});
+      return json({code,expiresAt},201,request,env);
+    }
 
     // Create a room → returns code + secret host token
     if (url.pathname === "/api/rooms" && request.method === "POST") {
@@ -417,6 +440,16 @@ export class Room extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.env = env;
+  }
+
+  async storePictureReport(report) {
+    await this.ctx.storage.put("picture-report",report);
+    await this.ctx.storage.setAlarm(report.expiresAt);
+  }
+  async readPictureReport() {
+    const report=await this.ctx.storage.get("picture-report");
+    if(report && report.expiresAt<=Date.now()) {await this.ctx.storage.deleteAll();return null;}
+    return report || null;
   }
 
   async init(code, hostHash, maxViewers, hostName, hostUserId) {
@@ -895,6 +928,12 @@ export class Room extends DurableObject {
   }
 
   async alarm() {
+    const picture=await this.ctx.storage.get("picture-report");
+    if(picture) {
+      if(picture.expiresAt<=Date.now()) await this.ctx.storage.deleteAll();
+      else await this.ctx.storage.setAlarm(picture.expiresAt);
+      return;
+    }
     const meta = await this.ctx.storage.get("meta");
     if (!meta) return;
     const now = Date.now();

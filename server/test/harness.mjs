@@ -812,5 +812,34 @@ const allowedLogFields = new Set(["event", "roomRef", "roomAgeMs", "reason", "ro
 ok(connectionEvents.every(e => Object.keys(e).every(k => allowedLogFields.has(k))), "all custom connection logs use a restricted field set");
 ok(connectionEvents.some(e => e.event === "room_connection_refused" && e.reason === "too_many_attempts") &&
   connectionEvents.some(e => e.event === "room_connection_refused" && e.reason === "not_host"), "connection refusals record the server reason");
+// Explicitly shared picture reports are independent of room membership.
+{
+  const auth={Authorization:'Bearer '+await tokenFor('Diagnostics')};
+  const body={version:'1.0.35',quality:'Auto 1080p',name:'Private Name',room:'SECRET-ROOM',
+    ip:'192.0.2.42',viewers:[],history:[{at:Date.now(),width:640,height:360,fps:24,
+      sourceWidth:1920,sourceHeight:1080,codec:'VP8',encoder:'libvpx',limit:'cpu',route:'relay UDP',name:'Private Name'}]};
+  const upload=()=>call('/api/diagnostics',{method:'POST',headers:auth,body:JSON.stringify(body)});
+  ok((await call('/api/diagnostics',{method:'POST',headers:{Authorization:null},body:JSON.stringify(body)})).status===401,'sharing a picture report requires sign-in');
+  const response=await upload(), shared=await response.json();
+  ok(response.status===201 && /^[a-f0-9]{24}$/.test(shared.code),'report gets an unguessable read code');
+  const read=await worker.fetch(new Request('https://server.test/api/diagnostics/'+shared.code),env);
+  const result=await read.json(), text=JSON.stringify(result);
+  ok(read.status===200 && result.report.history[0].codec==='VP8','shared report code works without viewer sign-in or Origin');
+  ok(!['Private Name','SECRET-ROOM','192.0.2.42'].some(secret=>text.includes(secret)),'server removes identifying and unknown fields before storage');
+  ok(read.headers.get('Cache-Control')==='no-store','shared report is not cached');
+  const store=env.ROOM.get('diagnostics-'+shared.code);
+  const saved=await store._ctx.storage.get('picture-report');
+  saved.expiresAt=Date.now()-1;await store._ctx.storage.put('picture-report',saved);
+  ok((await call('/api/diagnostics/'+shared.code)).status===404,'expired report cannot be retrieved');
+  await store.storePictureReport(saved);await store.alarm();
+  ok(store._ctx.storage.map.size===0,'expiry alarm deletes stored diagnostic data');
+  for(let i=0;i<4;i++) await upload();
+  ok((await upload()).status===429,'per-account upload allowance is bounded');
+  const auth2={Authorization:'Bearer '+await tokenFor('DiagnosticsOther')};
+  ok((await call('/api/diagnostics',{method:'POST',headers:auth2,body:'x'.repeat(65537)})).status===400,'oversized report bodies are refused');
+  const budget=env.LIMITER.get('diagnostics-global');
+  await budget._ctx.storage.put('upload',Array(50).fill(Date.now()));
+  ok((await call('/api/diagnostics',{method:'POST',headers:auth2,body:JSON.stringify(body)})).status===429,'global report storage allowance stops new uploads at the limit');
+}
 console.log(failures ? `\n${failures} check(s) failed` : "\nAll checks passed");
 process.exit(failures ? 1 : 0);
