@@ -666,6 +666,11 @@ public class MainActivity extends Activity {
             if (ourPage && engine != null) engine.testPlaybackCapture();
         }
 
+        @JavascriptInterface
+        public String pictureHistory() {
+            return ourPage && engine != null ? engine.pictureHistory() : "[]";
+        }
+
         /** Play/pause whatever app is playing on the TV (Hot Player etc.), like the remote's ⏯ key. */
         @JavascriptInterface
         public void mediaKey(String action) {

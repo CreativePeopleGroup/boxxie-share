@@ -22,10 +22,15 @@
         /^(direct|relay)( (UDP|TCP|TLS))?$/.test(h.route) ? h.route : "route unknown",
         h.limit === "cpu" ? "encoder busy" : h.limit === "bandwidth" ? "network limited" : ""].filter(Boolean).join(" · ");
     },
-    report({ version, device, quality, viewers }) {
+    historyLine(h) {
+      return `${Number.isFinite(h.at) ? new Date(h.at).toISOString().slice(11,19) + ' UTC' : 'Time unknown'} · Viewer ${Number.isFinite(h.viewer) ? h.viewer : '?'} · ${diagnostics.line(h)} · source ${Number(h.sourceWidth) || '?'}×${Number(h.sourceHeight) || '?'} · ${clean(h.codec)}`;
+    },
+    report({ version, device, quality, viewers, history = [] }) {
       return [`Boxxie Share ${clean(version)}`, `Device: ${clean(device)}`, `Host setting: ${clean(quality)}`,
         ...viewers.map((h, i) => `Viewer ${i + 1}: ${diagnostics.line(h)}\nCodec: ${clean(h.codec)}; profile: ${clean(h.profile)}; encoder: ${clean(h.encoder)}${h.targetBitrate > 0 ? `; target ${(h.targetBitrate / 1e6).toFixed(2)} Mbps` : ""}${h.startupBitrateAccepted === undefined ? "" : `; start hint ${h.startupBitrateAccepted ? "accepted" : "not accepted"}`}`),
-        viewers.length ? "" : "No active viewer stats yet."].filter(Boolean).join("\n");
+        viewers.length ? "" : "No active viewer stats yet.",
+        history.length ? "Recent picture samples (in memory; source is captured screen/track, not original film quality):" : "",
+        ...history.slice(-120).map(h => diagnostics.historyLine(h))].filter(Boolean).join("\n");
     },
   };
   if (typeof module !== "undefined") module.exports = diagnostics;
