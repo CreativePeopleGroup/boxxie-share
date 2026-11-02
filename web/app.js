@@ -1174,6 +1174,12 @@
   }
   $("diagnostics-prev").onclick = () => scrollPictureDetails(-1);
   $("diagnostics-next").onclick = () => scrollPictureDetails(1);
+  $("diagnostics-report").addEventListener("focus", e => {
+    // Replacing textarea.value leaves its caret at the end. Native focus can
+    // otherwise jump straight to the final sample before remote scrolling starts.
+    e.currentTarget.setSelectionRange(0, 0);
+    e.currentTarget.scrollTop = 0;
+  });
   $("diagnostics-report").addEventListener("keydown", e => {
     if (!["ArrowUp", "ArrowDown"].includes(e.key)) return;
     const field = e.currentTarget;

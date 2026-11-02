@@ -309,6 +309,8 @@ async function mediaProgress(page) {
     await host.keyboard.press('ArrowDown');
     assert.equal(await host.evaluate(()=>document.activeElement.id),'diagnostics-report',
       'Remote Down reaches the report from the copy button');
+    assert.equal(await host.locator('#diagnostics-report').evaluate(field=>field.scrollTop),0,
+      'Entering the report starts at the first details instead of the textarea caret at the end');
     await host.keyboard.press('ArrowDown');
     assert(await host.locator('#diagnostics-report').evaluate(field=>field.scrollTop>0),
       'Remote Down scrolls historical samples inside the report');
