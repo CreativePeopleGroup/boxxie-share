@@ -336,6 +336,7 @@ async function mediaProgress(page) {
     async function checkButtonGroups() {
       const groups = await host.evaluate(() => [
         ['test-sound', 'test-tv-capture', 'copy-diagnostics'], ['ctl-reshare', 'ctl-stopshare'],
+        ['diagnostics-prev', 'diagnostics-next'],
       ].map(ids => ids.map(id => {
         const box = document.getElementById(id).getBoundingClientRect();
         return { id, width: box.width, height: box.height, left: box.left, top: box.top };
@@ -347,6 +348,7 @@ async function mediaProgress(page) {
       }
       assert(Math.abs(groups[0][0].left - groups[0][1].left) < 1, 'Sound buttons align vertically');
       assert(Math.abs(groups[1][0].top - groups[1][1].top) < 1, 'Sharing buttons align horizontally');
+      assert(Math.abs(groups[2][0].top - groups[2][1].top) < 1, 'Report paging buttons align horizontally');
     }
     await checkButtonGroups();
     await host.locator('#help-close').click();
