@@ -1265,7 +1265,8 @@
         const source = track?.getSettings?.() || {};
         pictureSamples.push({at: Date.now(), viewer: pictureNumbers.get(ev.peer),
           width:h.width, height:h.height, fps:h.fps, mbps:h.mbps, route:h.route,
-          limit:h.limit, codec:h.codec, sourceWidth:source.width, sourceHeight:source.height});
+          limit:h.limit, codec:h.codec, encoder:h.encoder, targetBitrate:h.targetBitrate,
+          sourceWidth:source.width, sourceHeight:source.height});
         if (pictureSamples.length > 120) pictureSamples.shift();
       }
     }

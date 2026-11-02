@@ -23,7 +23,7 @@
         h.limit === "cpu" ? "encoder busy" : h.limit === "bandwidth" ? "network limited" : ""].filter(Boolean).join(" · ");
     },
     historyLine(h) {
-      return `${Number.isFinite(h.at) ? new Date(h.at).toISOString().slice(11,19) + ' UTC' : 'Time unknown'} · Viewer ${Number.isFinite(h.viewer) ? h.viewer : '?'} · ${diagnostics.line(h)} · source ${Number(h.sourceWidth) || '?'}×${Number(h.sourceHeight) || '?'} · ${clean(h.codec)}`;
+      return `${Number.isFinite(h.at) ? new Date(h.at).toISOString().slice(11,19) + ' UTC' : 'Time unknown'} · Viewer ${Number.isFinite(h.viewer) ? h.viewer : '?'} · ${diagnostics.line(h)} · source ${Number(h.sourceWidth) || '?'}×${Number(h.sourceHeight) || '?'} · ${clean(h.codec)} · encoder ${clean(h.encoder)}${h.targetBitrate > 0 ? ` · target ${(h.targetBitrate / 1e6).toFixed(2)} Mbps` : ''}`;
     },
     report({ version, device, quality, viewers, history = [] }) {
       return [`Boxxie Share ${clean(version)}`, `Device: ${clean(device)}`, `Host setting: ${clean(quality)}`,
