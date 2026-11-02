@@ -348,6 +348,49 @@ async function mediaProgress(page) {
         'Portrait video keeps its size while the keyboard reduces viewport height');
       await viewer.setViewportSize({width:390,height:844});
       await viewer.locator('#chat-input').blur();
+      const rotationStart = await mediaProgress(viewer);
+      const peerCount = await viewer.evaluate(() => window.__audioTestPeers.length);
+      await viewer.evaluate(() => {
+        window.__screenSizeDescriptors = ['width','height'].map(key => Object.getOwnPropertyDescriptor(screen,key));
+        Object.defineProperty(screen,'width',{configurable:true,value:390});
+        Object.defineProperty(screen,'height',{configurable:true,value:844});
+      });
+      try {
+        for (const viewport of [{width:844,height:390},{width:390,height:844},{width:844,height:390}]) {
+          await viewer.setViewportSize(viewport);
+          // Exercise the app event as well as real viewport resize. This is not
+          // proof of the iPhone native fullscreen compositor's behaviour.
+          await viewer.evaluate(() => document.dispatchEvent(new Event('fullscreenchange')));
+          await host.waitForFunction(() => window.__lastDisplayHeight === 720);
+          await viewer.waitForTimeout(400);
+          assert.equal(await host.evaluate(() => window.__lastDisplayHeight),720,
+            'Portrait screen plus landscape viewport must not request tablet quality');
+          const stable = await viewer.evaluate(async () => {
+            const video=document.getElementById('film');
+            const bounds=()=>{const r=video.getBoundingClientRect();return [r.x,r.y,r.width,r.height];};
+            const before=bounds();
+            for(let i=0;i<12;i++) {
+              await new Promise(requestAnimationFrame);
+              if(bounds().some((v,j)=>Math.abs(v-before[j])>1)) return false;
+            }
+            const r=video.getBoundingClientRect(), parent=video.parentElement.getBoundingClientRect();
+            return r.width>0 && r.height>0 && r.left>=parent.left-1 && r.right<=parent.right+1;
+          });
+          assert(stable,'Video geometry settles and stays within its stage after rotation');
+        }
+        const rotationEnd = await mediaProgress(viewer);
+        assert(rotationEnd.frames>rotationStart.frames && rotationEnd.energy>rotationStart.energy,
+          'Decoded video and received audio progress across rotation');
+        assert.equal(await viewer.evaluate(() => window.__audioTestPeers.length),peerCount,
+          'Rotation and fullscreen notifications do not rebuild media peers');
+        console.log(`PASS ${engine}: repeated rotation keeps phone quality, stable geometry and progressing media on existing peers (simulated display)`);
+      } finally {
+        await viewer.evaluate(() => ['width','height'].forEach((key,i) => {
+          const descriptor=window.__screenSizeDescriptors[i];
+          if(descriptor) Object.defineProperty(screen,key,descriptor); else delete screen[key];
+        }));
+        await viewer.setViewportSize({width:390,height:844});
+      }
       await host.evaluate(() => { window.__lastDisplayHeight = null; });
       await viewer.locator('#viewer-display').selectOption('tv');
       await host.waitForFunction(() => window.__lastDisplayHeight === 1080);
