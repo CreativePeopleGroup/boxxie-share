@@ -301,6 +301,36 @@ async function mediaProgress(page) {
     await host.locator('#help-open').click();
     assert(await host.locator('#diagnostics-report').isVisible(),
       'Opening help shows readable picture details before clipboard interaction');
+    const originalReport = await host.locator('#diagnostics-report').inputValue();
+    await host.locator('#diagnostics-report').evaluate(field => {
+      field.value = Array.from({length:100},(_,i)=>`Historical picture sample ${i}`).join('\n');
+    });
+    await host.locator('#copy-diagnostics').focus();
+    await host.keyboard.press('ArrowDown');
+    assert.equal(await host.evaluate(()=>document.activeElement.id),'diagnostics-report',
+      'Remote Down reaches the report from the copy button');
+    assert.equal(await host.locator('#diagnostics-report').evaluate(field=>field.scrollTop),0,
+      'Entering the report starts at the first details instead of the textarea caret at the end');
+    await host.keyboard.press('ArrowDown');
+    assert(await host.locator('#diagnostics-report').evaluate(field=>field.scrollTop>0),
+      'Remote Down scrolls historical samples inside the report');
+    await host.keyboard.press('ArrowUp');
+    await host.keyboard.press('ArrowUp');
+    assert.notEqual(await host.evaluate(()=>document.activeElement.id),'diagnostics-report',
+      'Remote can leave the report at its upper boundary');
+    await host.locator('#diagnostics-next').click();
+    assert(await host.locator('#diagnostics-report').evaluate(field=>field.scrollTop>0),
+      'More details reads history without focusing the text box');
+    await host.locator('#diagnostics-prev').click();
+    assert.equal(await host.locator('#diagnostics-report').evaluate(field=>field.scrollTop),0);
+    const pageButtons=await host.locator('#diagnostics-pages button').evaluateAll(buttons=>buttons.map(button=>{
+      const r=button.getBoundingClientRect();return {width:r.width,height:r.height,top:r.top};
+    }));
+    assert(Math.abs(pageButtons[0].width-pageButtons[1].width)<1 &&
+      Math.abs(pageButtons[0].height-pageButtons[1].height)<1 &&
+      Math.abs(pageButtons[0].top-pageButtons[1].top)<1 && pageButtons[0].height>=44,
+      'Report paging buttons match size and alignment with full-size targets');
+    await host.locator('#diagnostics-report').evaluate((field,value)=>{field.value=value;field.scrollTop=0;},originalReport);
     await host.locator('#test-tv-capture').click();
     assert((await host.evaluate(() => window.__nativeCalls)).includes('tv-capture-test'),
       'TV sound capture control calls the Android bridge');
@@ -308,6 +338,7 @@ async function mediaProgress(page) {
     async function checkButtonGroups() {
       const groups = await host.evaluate(() => [
         ['test-sound', 'test-tv-capture', 'copy-diagnostics'], ['ctl-reshare', 'ctl-stopshare'],
+        ['diagnostics-prev', 'diagnostics-next'],
       ].map(ids => ids.map(id => {
         const box = document.getElementById(id).getBoundingClientRect();
         return { id, width: box.width, height: box.height, left: box.left, top: box.top };
@@ -319,6 +350,7 @@ async function mediaProgress(page) {
       }
       assert(Math.abs(groups[0][0].left - groups[0][1].left) < 1, 'Sound buttons align vertically');
       assert(Math.abs(groups[1][0].top - groups[1][1].top) < 1, 'Sharing buttons align horizontally');
+      assert(Math.abs(groups[2][0].top - groups[2][1].top) < 1, 'Report paging buttons align horizontally');
     }
     await checkButtonGroups();
     await host.locator('#help-close').click();

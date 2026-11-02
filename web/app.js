@@ -1160,12 +1160,39 @@
     // Always readable on TVs; copying is optional, not a prerequisite.
     $("diagnostics-report").value = pictureReport();
     $("diagnostics-report").hidden = false;
+    $("diagnostics-report").scrollTop = 0;
+    $("diagnostics-pages").hidden = false;
     $("copy-diagnostics").focus();
   };
   $("help-close").onclick = () => {
     $("picture-help").hidden = true;
     $("help-open").focus();
   };
+  function scrollPictureDetails(direction) {
+    const field = $("diagnostics-report");
+    field.scrollTop += direction * Math.max(40, field.clientHeight - 24);
+  }
+  $("diagnostics-prev").onclick = () => scrollPictureDetails(-1);
+  $("diagnostics-next").onclick = () => scrollPictureDetails(1);
+  $("diagnostics-report").addEventListener("focus", e => {
+    // Replacing textarea.value leaves its caret at the end. Native focus can
+    // otherwise jump straight to the final sample before remote scrolling starts.
+    e.currentTarget.setSelectionRange(0, 0);
+    e.currentTarget.scrollTop = 0;
+  });
+  $("diagnostics-report").addEventListener("keydown", e => {
+    if (!["ArrowUp", "ArrowDown"].includes(e.key)) return;
+    const field = e.currentTarget;
+    const down = e.key === "ArrowDown";
+    e.preventDefault();
+    e.stopPropagation();
+    if (down ? field.scrollTop + field.clientHeight < field.scrollHeight - 1 : field.scrollTop > 0) {
+      scrollPictureDetails(down ? 1 : -1);
+    } else {
+      $(down ? "diagnostics-next" : "copy-diagnostics").focus();
+    }
+    // Explicit exits avoid geometry differences between TV WebViews.
+  });
   function pictureReport() {
     const active = (S.roster || []).filter(v => !v.companionOf).map(v => health.get(v.id) || {});
     let history = pictureSamples;
@@ -1184,13 +1211,14 @@
     const report = pictureReport();
     try {
       await navigator.clipboard.writeText(report);
-      $("diagnostics-report").hidden = true;
+      $("diagnostics-report").value = report;
       toast("Picture diagnostics copied");
     } catch {
       // TV WebViews may not expose the clipboard. Keep the same report readable.
       const field = $("diagnostics-report");
       field.value = report;
       field.hidden = false;
+      $("diagnostics-pages").hidden = false;
       field.focus();
       field.select();
       toast("Report shown below. You can copy it or take a photo.");
@@ -3348,6 +3376,7 @@
     localAudioHealth = null;
     S.pendingFriendInvite = null;
     $("diagnostics-report").hidden = true;
+    $("diagnostics-pages").hidden = true;
     $("picture-help").hidden = true;
     clearTimeout(hostAwayTimer);
     screenRestartAt.clear();
