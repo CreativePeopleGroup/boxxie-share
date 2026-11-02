@@ -1220,7 +1220,7 @@
         status.textContent=result.status===429 ? "Report allowance reached. Try again tomorrow; sharing continues." : "Couldn't share the report. Check your connection and try again.";
         return;
       }
-      status.textContent=`Report code: ${result.data.code}. Paste this in our chat. Expires in 24 hours.`;
+      status.textContent=`Sent to support. Report code: ${result.data.code}. Support can now retrieve it directly. Expires in 24 hours.`;
       try {await navigator.clipboard.writeText(result.data.code);status.textContent+=" Code copied.";} catch {}
     } finally {button.disabled=false;}
   };

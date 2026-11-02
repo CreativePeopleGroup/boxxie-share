@@ -264,7 +264,8 @@ export default {
     // Google/Facebook sign-in pages are opened directly by the browser (no Origin header);
     // they check the return address instead.
     const reportRead = request.method === "GET" && /^\/api\/diagnostics\/[a-f0-9]{24}$/.test(url.pathname);
-    const browserNav = reportRead || /^\/auth\/(google|facebook)\/(start|callback)$/.test(url.pathname) || url.pathname === "/dev/mail" || url.pathname === "/admin/ban";
+    const inboxRead = request.method === "GET" && url.pathname === "/admin/diagnostics";
+    const browserNav = inboxRead || reportRead || /^\/auth\/(google|facebook)\/(start|callback)$/.test(url.pathname) || url.pathname === "/dev/mail" || url.pathname === "/admin/ban";
     if (!browserNav && !originAllowed(request, env)) return refuse("origin_not_allowed", 403);
 
     const accounts = await handleAccounts(request, env, {
@@ -278,6 +279,20 @@ export default {
     if (accounts) return accounts;
 
     const bearer = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
+
+    if(inboxRead) {
+      if(!await limiter.hit("diagnostics-inbox",30,60*60*1000)) return refuse("too_many_reports",429);
+      const key=env.DIAGNOSTICS_READ_TOKEN;
+      if(typeof key!=="string" || key.length<64 || !timingSafeEqual(bearer,key)) return refuse("not_allowed",403);
+      const inbox=env.ROOM.get(env.ROOM.idFromName("diagnostics-inbox"));
+      const entries=await inbox.pictureReportIndex();
+      const reports=[];
+      for(const entry of entries.slice(-10).reverse()) {
+        const value=await env.ROOM.get(env.ROOM.idFromName("diagnostics-"+entry.code)).readPictureReport();
+        if(value) reports.push({code:entry.code,...value});
+      }
+      return json({reports},200,request,env);
+    }
 
     // A report code is an unguessable, expiring read capability, independent of rooms.
     if (reportRead) {
@@ -297,6 +312,7 @@ export default {
       if(!await budget.hit("upload",50,24*60*60*1000)) return refuse("report_capacity",429);
       const code=randomToken(12), expiresAt=Date.now()+24*60*60*1000;
       await env.ROOM.get(env.ROOM.idFromName("diagnostics-"+code)).storePictureReport({report,expiresAt});
+      await env.ROOM.get(env.ROOM.idFromName("diagnostics-inbox")).indexPictureReport({code,expiresAt});
       return json({code,expiresAt},201,request,env);
     }
 
@@ -450,6 +466,26 @@ export class Room extends DurableObject {
     const report=await this.ctx.storage.get("picture-report");
     if(report && report.expiresAt<=Date.now()) {await this.ctx.storage.deleteAll();return null;}
     return report || null;
+  }
+  async indexPictureReport(entry) {
+    const entries=await this.ctx.storage.transaction(async tx=>{
+      const live=((await tx.get("picture-index")) || []).filter(row=>row.expiresAt>Date.now());
+      live.push(entry);
+      const bounded=live.slice(-50);
+      await tx.put("picture-index",bounded);
+      return bounded;
+    });
+    await this.ctx.storage.setAlarm(Math.min(...entries.map(row=>row.expiresAt)));
+  }
+  async pictureReportIndex() {
+    const entries=await this.ctx.storage.transaction(async tx=>{
+      const live=((await tx.get("picture-index")) || []).filter(row=>row.expiresAt>Date.now());
+      if(live.length) await tx.put("picture-index",live);
+      else await tx.delete("picture-index");
+      return live;
+    });
+    if(entries.length) await this.ctx.storage.setAlarm(Math.min(...entries.map(row=>row.expiresAt)));
+    return entries;
   }
 
   async init(code, hostHash, maxViewers, hostName, hostUserId) {
@@ -928,6 +964,10 @@ export class Room extends DurableObject {
   }
 
   async alarm() {
+    if(await this.ctx.storage.get("picture-index")) {
+      await this.pictureReportIndex();
+      return;
+    }
     const picture=await this.ctx.storage.get("picture-report");
     if(picture) {
       if(picture.expiresAt<=Date.now()) await this.ctx.storage.deleteAll();

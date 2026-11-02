@@ -23,6 +23,11 @@ globalThis.Response = class extends BaseResponse {
   }
 };
 class Storage {
+  transaction(fn) {
+    const task=(this.pending || Promise.resolve()).then(()=>fn(this));
+    this.pending=task.catch(()=>{});
+    return task;
+  }
   constructor() { this.map = new Map(); }
   async get(k) { const v = this.map.get(k); return v === undefined ? undefined : structuredClone(v); }
   async put(k, v) { this.map.set(k, structuredClone(v)); }
