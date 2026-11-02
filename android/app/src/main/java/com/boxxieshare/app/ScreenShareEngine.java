@@ -876,8 +876,11 @@ public final class ScreenShareEngine {
                 JSONObject d = new JSONObject(json);
                 if (d.has("session") && !d.optString("session").equals(v.sess)) return;
                 if (d.has("displayHeight")) {
-                    v.displayHeight = d.optInt("displayHeight", 720) >= 1080 ? 1080 : 720;
-                    limitBitrate(v, v.vp8, v.codec);
+                    int height = d.optInt("displayHeight", 720) >= 1080 ? 1080 : 720;
+                    if (v.displayHeight != height) {
+                        v.displayHeight = height;
+                        limitBitrate(v, v.vp8, v.codec);
+                    }
                 }
                 if (d.has("sdp")) {
                     JSONObject s = d.getJSONObject("sdp");

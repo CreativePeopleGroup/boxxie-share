@@ -1,6 +1,13 @@
 // Requests are ceilings; WebRTC still owns congestion and encoder adaptation.
 ((root) => {
   const policy = {
+    receiverHeight({ screenWidth = 0, screenHeight = 0, width = 0, height = 0, tv = false, mode = "auto" } = {}) {
+      // Use one coordinate space. Combining portrait screen dimensions with a
+      // landscape viewport can invent a square tablet during rotation.
+      const hasScreen = screenWidth > 0 && screenHeight > 0;
+      return policy.displayHeight({ width: hasScreen ? screenWidth : width,
+        height: hasScreen ? screenHeight : height, tv, mode });
+    },
     preference(quality, displayHeight) {
       return !quality.automatic || displayHeight >= 1080 ? "balanced" : "maintain-framerate";
     },
