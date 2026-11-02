@@ -11,7 +11,7 @@
         row.codec=['H264','VP8','VP9','AV1','H265'].includes(h.codec) ? h.codec : 'unknown';
         row.limit=['none','cpu','bandwidth','other'].includes(h.limit) ? h.limit : 'unknown';
         row.route=['direct UDP','direct TCP','relay UDP','relay TCP','relay TLS'].includes(h.route) ? h.route : 'unknown';
-        row.encoder=h.encoder==='libvpx' ? 'libvpx' : /^(MediaCodec|OMX\.|c2\.)/i.test(String(h.encoder || '')) ? 'hardware/platform' : 'unknown';
+        row.encoder=h.encoder==='libvpx' ? 'libvpx' : /^(MediaCodec|OMX\.|c2\.)/i.test(String(h.encoder || '')) ? 'platform' : 'unknown';
         return row;
       };
       return {version:/^1\.0\.\d{1,6}$/.test(body.version) ? body.version : 'web',

@@ -10,7 +10,7 @@ function sample(input) {
   out.codec=pick(String(h.codec || '').toUpperCase(),['H264','VP8','VP9','AV1','H265']);
   out.limit=pick(h.limit,['none','cpu','bandwidth','other']);
   out.route=pick(h.route,['direct UDP','direct TCP','relay UDP','relay TCP','relay TLS']);
-  out.encoder=h.encoder==='libvpx' ? 'libvpx' : h.encoder==='hardware/platform' || /^(MediaCodec|OMX\.|c2\.)/i.test(String(h.encoder || '')) ? 'hardware/platform' : 'unknown';
+  out.encoder=h.encoder==='libvpx' ? 'libvpx' : h.encoder==='platform' || /^(MediaCodec|OMX\.|c2\.)/i.test(String(h.encoder || '')) ? 'platform' : 'unknown';
   return out;
 }
 export function cleanPictureReport(body) {

@@ -34,6 +34,6 @@ const shared=diag.shareable({version:'1.0.35',quality:'Auto 1080p',device:'Priva
   name:'Private Person',ip:'192.0.2.10',encoder:'OMX.private-text',codec:'H264',width:640,height:360,
 }],history});
 assert.equal(shared.history.length,120);
-assert.equal(shared.viewers[0].encoder,'hardware/platform');
+assert.equal(shared.viewers[0].encoder,'platform');
 for(const secret of ['Private Person','192.0.2.10','user-secret','OMX.private-text']) assert(!JSON.stringify(shared).includes(secret));
 console.log('PASS selected route, measured quality, encoder limits and report privacy');
