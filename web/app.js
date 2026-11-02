@@ -1178,12 +1178,14 @@
     if (!["ArrowUp", "ArrowDown"].includes(e.key)) return;
     const field = e.currentTarget;
     const down = e.key === "ArrowDown";
+    e.preventDefault();
+    e.stopPropagation();
     if (down ? field.scrollTop + field.clientHeight < field.scrollHeight - 1 : field.scrollTop > 0) {
-      e.preventDefault();
-      e.stopPropagation();
       scrollPictureDetails(down ? 1 : -1);
+    } else {
+      $(down ? "diagnostics-next" : "copy-diagnostics").focus();
     }
-    // At either edge, the normal remote navigation can leave the report.
+    // Explicit exits avoid geometry differences between TV WebViews.
   });
   function pictureReport() {
     const active = (S.roster || []).filter(v => !v.companionOf).map(v => health.get(v.id) || {});
