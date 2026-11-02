@@ -560,7 +560,11 @@
       <div class="invite-head"><h3 id="picture-help-title">Picture &amp; sound help</h3><button class="small" id="help-close" type="button">Done</button></div>
       <p class="note">Check the sound or copy picture details to help diagnose a problem.</p>
             <button class="small" id="copy-diagnostics" type="button">Copy picture details</button>
-            <textarea id="diagnostics-report" class="diagnostics-report" aria-label="Picture diagnostics report" readonly hidden></textarea>
+            <textarea id="diagnostics-report" class="diagnostics-report" aria-label="Picture diagnostics report. Use up and down to scroll." tabindex="0" readonly hidden></textarea>
+            <div id="diagnostics-pages" class="diagnostics-pages" role="group" aria-label="Read picture details" hidden>
+              <button class="small" id="diagnostics-prev" type="button">Previous details</button>
+              <button class="small" id="diagnostics-next" type="button">More details</button>
+            </div>
             <div class="sound-tests" role="group" aria-label="Sound tests">
               <button class="small" id="test-sound" type="button" hidden>Send a test beep</button>
               <button class="small" id="test-tv-capture" type="button" hidden>Test TV sound capture</button>

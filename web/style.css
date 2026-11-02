@@ -80,6 +80,9 @@ body {
 .viewer-display { display: flex; align-items: center; gap: 8px; margin-left: auto; font-size: 14px; }
 .viewer-display select { width: auto; min-height: 44px; max-width: 190px; }
 .diagnostics-report { width: 100%; min-height: 100px; max-height: 180px; resize: vertical; font-size: 14px; }
+.diagnostics-report:focus-visible { outline: 3px solid var(--sand); outline-offset: 3px; }
+.diagnostics-pages { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.diagnostics-pages button { width: 100%; min-height: 44px; }
 #screen-diag { pointer-events: none; }
 #viewer-controls { flex-wrap: wrap; gap: 8px; }
 @media (max-width: 600px) {

@@ -1160,12 +1160,31 @@
     // Always readable on TVs; copying is optional, not a prerequisite.
     $("diagnostics-report").value = pictureReport();
     $("diagnostics-report").hidden = false;
+    $("diagnostics-report").scrollTop = 0;
+    $("diagnostics-pages").hidden = false;
     $("copy-diagnostics").focus();
   };
   $("help-close").onclick = () => {
     $("picture-help").hidden = true;
     $("help-open").focus();
   };
+  function scrollPictureDetails(direction) {
+    const field = $("diagnostics-report");
+    field.scrollTop += direction * Math.max(40, field.clientHeight - 24);
+  }
+  $("diagnostics-prev").onclick = () => scrollPictureDetails(-1);
+  $("diagnostics-next").onclick = () => scrollPictureDetails(1);
+  $("diagnostics-report").addEventListener("keydown", e => {
+    if (!["ArrowUp", "ArrowDown"].includes(e.key)) return;
+    const field = e.currentTarget;
+    const down = e.key === "ArrowDown";
+    if (down ? field.scrollTop + field.clientHeight < field.scrollHeight - 1 : field.scrollTop > 0) {
+      e.preventDefault();
+      e.stopPropagation();
+      scrollPictureDetails(down ? 1 : -1);
+    }
+    // At either edge, the normal remote navigation can leave the report.
+  });
   function pictureReport() {
     const active = (S.roster || []).filter(v => !v.companionOf).map(v => health.get(v.id) || {});
     let history = pictureSamples;
@@ -1184,13 +1203,14 @@
     const report = pictureReport();
     try {
       await navigator.clipboard.writeText(report);
-      $("diagnostics-report").hidden = true;
+      $("diagnostics-report").value = report;
       toast("Picture diagnostics copied");
     } catch {
       // TV WebViews may not expose the clipboard. Keep the same report readable.
       const field = $("diagnostics-report");
       field.value = report;
       field.hidden = false;
+      $("diagnostics-pages").hidden = false;
       field.focus();
       field.select();
       toast("Report shown below. You can copy it or take a photo.");
@@ -3348,6 +3368,7 @@
     localAudioHealth = null;
     S.pendingFriendInvite = null;
     $("diagnostics-report").hidden = true;
+    $("diagnostics-pages").hidden = true;
     $("picture-help").hidden = true;
     clearTimeout(hostAwayTimer);
     screenRestartAt.clear();
