@@ -1151,24 +1151,37 @@
 
   // ----- TV app: how each friend's picture is doing (shown under "Friends join here") -----
   const health = new Map();
+  const pictureSamples = [];
+  const pictureNumbers = new Map();
+  let pictureSequence = 0;
   let localAudioHealth = null;
   $("help-open").onclick = () => {
     $("picture-help").hidden = false;
+    // Always readable on TVs; copying is optional, not a prerequisite.
+    $("diagnostics-report").value = pictureReport();
+    $("diagnostics-report").hidden = false;
     $("copy-diagnostics").focus();
   };
   $("help-close").onclick = () => {
     $("picture-help").hidden = true;
     $("help-open").focus();
   };
-  $("copy-diagnostics").onclick = async () => {
+  function pictureReport() {
     const active = (S.roster || []).filter(v => !v.companionOf).map(v => health.get(v.id) || {});
-    const report = window.BoxxieDiagnostics.report({
+    let history = pictureSamples;
+    try {
+      if (S.native && typeof NATIVE.pictureHistory === "function") history = JSON.parse(NATIVE.pictureHistory());
+    } catch {}
+    return window.BoxxieDiagnostics.report({
       version: APP ? APP.name : "web",
       device: NATIVE ? [nativeInfo.manufacturer, nativeInfo.model,
         `Android ${nativeInfo.androidVersion || nativeInfo.sdk || "unknown"}`,
         `WebView ${nativeInfo.webViewVersion || "unknown"}`].filter(Boolean).join(" · ") : "Web browser",
-      quality: quality().label, viewers: active,
+      quality: quality().label, viewers: active, history: Array.isArray(history) ? history : [],
     });
+  }
+  $("copy-diagnostics").onclick = async () => {
+    const report = pictureReport();
     try {
       await navigator.clipboard.writeText(report);
       $("diagnostics-report").hidden = true;
@@ -1246,6 +1259,16 @@
       h.outgoingPeak = ev.outgoingPeak;
       h.captureError = ev.captureError;
       h.limit = ev.limit;
+      if (!S.native) {
+        if (!pictureNumbers.has(ev.peer)) pictureNumbers.set(ev.peer, ++pictureSequence);
+        const track = S.filmStream?.getVideoTracks()[0];
+        const source = track?.getSettings?.() || {};
+        pictureSamples.push({at: Date.now(), viewer: pictureNumbers.get(ev.peer),
+          width:h.width, height:h.height, fps:h.fps, mbps:h.mbps, route:h.route,
+          limit:h.limit, codec:h.codec, encoder:h.encoder, targetBitrate:h.targetBitrate,
+          sourceWidth:source.width, sourceHeight:source.height});
+        if (pictureSamples.length > 120) pictureSamples.shift();
+      }
     }
     health.set(ev.peer, h);
     renderHealth();
@@ -3319,6 +3342,9 @@
     $("room-duration").textContent = "";
     S.closing = true;
     health.clear();
+    pictureSamples.length = 0;
+    pictureNumbers.clear();
+    pictureSequence = 0;
     localAudioHealth = null;
     S.pendingFriendInvite = null;
     $("diagnostics-report").hidden = true;

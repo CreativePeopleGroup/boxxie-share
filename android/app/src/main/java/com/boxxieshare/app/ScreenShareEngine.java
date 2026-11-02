@@ -100,6 +100,8 @@ public final class ScreenShareEngine {
     private final List<PeerConnection.IceServer> iceServers = new ArrayList<>();
     private int maxBitrate = 8_000_000;
     private int captureHeight = 1080;
+    private int captureWidth = 1920;
+    private final PictureHistory pictureHistory = new PictureHistory();
     private int maxHeight = 1080;
     private boolean automaticQuality;
     private final Map<String, Viewer> viewers = new HashMap<>();
@@ -116,6 +118,7 @@ public final class ScreenShareEngine {
         int noPictureChecks;    // connected, but no frames encoded yet
         String ice = "new";
         String sess;            // connection id the viewer echoes back (new one after a codec switch)
+        long pictureNumber, sampleNs, sampleBytes;
         final List<IceCandidate> pending = new ArrayList<>();
     }
 
@@ -226,6 +229,14 @@ public final class ScreenShareEngine {
 
     public boolean isSharing() {
         return sharing;
+    }
+
+    public String pictureHistory() {
+        JSONArray rows = new JSONArray();
+        for (String sample : pictureHistory.snapshot()) {
+            try { rows.put(new JSONObject(sample)); } catch (Exception ignored) {}
+        }
+        return rows.toString();
     }
 
     // ------------------------------------------------------------------ setup
@@ -344,6 +355,8 @@ public final class ScreenShareEngine {
                 capturer.initialize(textureHelper, app, videoSource.getCapturerObserver());
                 int[] size = captureSize();
                 captureHeight = Math.min(size[0], size[1]);
+                captureWidth = Math.max(size[0], size[1]);
+                pictureHistory.clear();
                 capturer.startCapture(size[0], size[1], 30);
                 videoTrack = factory.createVideoTrack("screen-video", videoSource);
 
@@ -683,6 +696,7 @@ public final class ScreenShareEngine {
             v.vp8 = vp8;
             // A replacement peer is a new negotiation, even within one capture.
             v.sess = session + "-" + (++viewerGeneration) + (vp8 ? "-vp8" : "");
+            v.pictureNumber = viewerGeneration;
             PeerConnection pc = factory.createPeerConnection(rtc, new PeerObserver(id, v));
             if (pc == null) return;
             v.pc = pc;
@@ -817,6 +831,21 @@ public final class ScreenShareEngine {
             v.vp8BudgetApplied = true;
         }
         boolean connected = "connected".equals(v.ice) || "completed".equals(v.ice);
+        // Collected on the native worker even when the app page is suspended.
+        // Only these explicit fields enter the report: no room/account/peer IDs.
+        long sampleNs = System.nanoTime();
+        double measuredMbps = v.sampleNs > 0 && bytes >= v.sampleBytes
+                ? (bytes - v.sampleBytes) * 8000.0 / (sampleNs - v.sampleNs) : 0;
+        v.sampleNs = sampleNs;
+        v.sampleBytes = bytes;
+        try {
+            pictureHistory.add(new JSONObject().put("at", System.currentTimeMillis())
+                    .put("viewer", v.pictureNumber).put("width", width).put("height", height)
+                    .put("sourceWidth", captureWidth).put("sourceHeight", captureHeight)
+                    .put("fps", fps).put("mbps", measuredMbps).put("limit", limit)
+                    .put("codec", codec).put("encoder", encoder).put("route", route)
+                    .put("targetBitrate", targetBitrate).toString());
+        } catch (Exception ignored) {}
         if (connected && frames == 0) v.noPictureChecks++;
         else v.noPictureChecks = 0;
         try {

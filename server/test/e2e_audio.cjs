@@ -299,6 +299,8 @@ async function mediaProgress(page) {
     await viewer.locator('#screen-room:not([hidden])').waitFor();
     assert.equal(await host.locator('#request-list .allow').count(),0,'Explicit host invitation supplies approval without a typed room code');
     await host.locator('#help-open').click();
+    assert(await host.locator('#diagnostics-report').isVisible(),
+      'Opening help shows readable picture details before clipboard interaction');
     await host.locator('#test-tv-capture').click();
     assert((await host.evaluate(() => window.__nativeCalls)).includes('tv-capture-test'),
       'TV sound capture control calls the Android bridge');
